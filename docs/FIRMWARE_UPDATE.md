@@ -681,33 +681,7 @@ Failures: `wrongBlockSequenceCounter (0x73)`, `transferDataSuspended (0x71)`
 
 ---
 
-### 10. Multi-SHDR Re-auth and Re-erase (GHDR v2, `ramAppPayload == 1` only)
-
-Between SHDRs (after TransferExit, before next RequestDownload):
-
-```
-→ 31 01 02 01    checkModuleProgrammedCorrectly
-← 71 01 02 01 <status>
-
-→ 31 01 02 02    checkCorrectComponentAndRev
-← 71 01 02 02 <status>
-
-→ 10 02          re-enter programming session
-← 50 02 ...
-
-→ 27 xx / 27 xx+1    re-authenticate
-← 67 xx ... / 67 xx+1
-
-→ 2E 01 02 <module>  moduleToProgram
-← 50 01 ...
-
-→ 31 01 FF 00 01     erase next region
-← 71 01 FF 00 00
-```
-
----
-
-### 11. Verify Programming
+### 10. Verify Programming
 
 ```
 → 31 01 02 01    RoutineControl startRoutine 0x0201
@@ -743,24 +717,88 @@ Stop TesterPresent keepalive after receiving the positive response.
 
 ---
 
-## Multi-CPU ECU: PCS
+## Variant Lookup and Firmware File Selection
 
-`pcs` and `pcscpu2` share the same CAN IDs (`0x628` / `0x629`) and the same script
-(`0x00651070`). The bootloader selects which CPU to program via the `moduleToProgram`
-subfunction byte, which comes from the `module` field in each node table entry.
+A flash tool must translate a boot ID read from the device into the correct BHX
+file(s) using the lookup tables in `seed_artifacts_v2/`.
 
-|                         | `pcs.bhx` (CPU1) | `pcscpu2.bhx` (CPU2) |
-| ----------------------- | ---------------- | -------------------- |
-| CAN request ID          | `0x628`          | `0x628`              |
-| CAN response ID         | `0x629`          | `0x629`              |
-| `moduleToProgram` frame | `2E 01 02 00`    | `2E 01 02 0C`        |
-| RequestDownload address | `0x00088000`     | `0x00082000`         |
-| Flash sectors           | 4, 5, 6          | 1, 2, 3, 4           |
-| Component ID            | `0x001b`         | `0x0096`             |
-| Payload size (var. 531) | 154,172 bytes    | 88,292 bytes         |
+### Lookup table files
 
-Bootloader lives in Sector 0 (`0x80000–0x81FFF`) and is never erased.
-Flash order between `pcs` and `pcscpu2` is set by the orchestration layer.
+Two files provide the same mapping; use `signed_metadata_map.tsv` in production:
+
+| File                      | Description                                                                                                                                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version_map2.tsv`        | Unsigned lookup table — 6 tab-separated columns                                                                                                           |
+| `signed_metadata_map.tsv` | Signed version — same 6 columns plus a 7th base64 per-entry signature. First line is a manifest header (`<sha1>\t<entry_count>`) — skip it during lookup. |
+
+### Column format
+
+```
+<ecu>:<variant_id>  <artifact_path>  <local_filename>  <ecu_type>  <crc>  <conditions>  [<signature>]
+```
+
+- **`ecu`** — node name that owns the boot ID (e.g. `pcs`, `pm`)
+- **`variant_id`** — numeric boot ID reported by the ECU
+- **`artifact_path`** — path within `seed_artifacts_v2/` to the BHX file
+- **`local_filename`** — canonical staging name (e.g. `pcs.bhx`, `pcscpu2.bhx`)
+- **`ecu_type`** — node name the file is actually flashed to; may differ from `ecu` (see DI below)
+- **`crc`** — CRC32 of the SHDR payload, half-swapped: `((crc & 0xFFFF) << 16) | (crc >> 16)`
+- **`conditions`** — vehicle option constraints (e.g. `drivetrainType=0,vdcType=1`); `*` = unconditional
+- **`signature`** — (`signed_metadata_map.tsv` only) base64 per-entry signature
+
+### Boot ID to node lookup
+
+1. Connect to the ECU and read the boot ID (boot broadcast message or DID `0xF180`)
+2. Resolve `<ecu>:<boot_id>` in the table — filter rows by matching `conditions` against vehicle options
+3. Collect **all** matching rows — multi-file ECUs produce more than one
+
+### Multi-file ECUs: multiple rows, one boot ID
+
+Several ECUs map the same boot ID key to more than one BHX file. Each row carries a
+different `ecu_type` and `local_filename`; each is a separate sequential flash operation.
+
+**PCS** — two CPUs, same CAN IDs, same script (`0x00651070`), `moduleToProgram` selects the target:
+
+| Row | `local_filename` | `ecu_type` | SHDR address | Module byte | Flash sectors |
+| --- | ---------------- | ---------- | ------------ | ----------- | ------------- |
+| 1   | `pcs.bhx`        | `pcs`      | `0x00088000` | `0x00`      | 4, 5, 6       |
+| 2   | `pcscpu2.bhx`    | `pcscpu2`  | `0x00082000` | `0x0C`      | 1, 2, 3, 4    |
+
+Component IDs: CPU1 = `0x001b`, CPU2 = `0x0096`. Bootloader in Sector 0 (`0x80000–0x81FFF`) is never erased.
+
+**DI** — keyed by the PM (power module) boot ID, but `ecu_type=di`:
+
+```
+pm:390004738   di/12360/DI_23-63-2_M3_Single_crc.bhx   di.bhx   di   ...   drivetrainType=0,vdcType=0
+```
+
+The `di` node carries module byte `0x0c`, so it is flashed as a secondary CPU even though the
+lookup key came from `pm`.
+
+### Flash ordering for multi-file ECUs
+
+TSV row order is authoritative. For PCS, CPU1 (`ecu_type=pcs`) rows always appear before
+CPU2 (`ecu_type=pcscpu2`) rows. Flash in TSV order:
+
+1. Flash `pcs.bhx` → `moduleToProgram` sends `2E 01 02 00` → CPU1 at `0x00088000`
+2. Flash `pcscpu2.bhx` → `moduleToProgram` sends `2E 01 02 0C` → CPU2 at `0x00082000`
+
+Each entry goes through its own full prog-0 sequence (reset → session → auth →
+moduleToProgram → erase → transfer → verify → reset). **Both BHX files must be staged
+before the update sequence begins** — the second flash follows immediately after the
+first reset with no opportunity to load files between them.
+
+The module byte comes from the node table entry for each `ecu_type`, **not** from the
+BHX file. The SHDR target address and payload size are the only BHX-derived values
+passed to the ECU (via `RequestDownload`).
+
+### Prog 1 module bytes vs node module bytes
+
+Script `0x00651070` prog 1 hardcodes `moduleToProgram(4)` then `moduleToProgram(0)`.
+These are PCS bootloader-internal region codes for flashing both CPUs in a single
+authenticated session. They are **distinct** from the node table module bytes
+(`0x00` / `0x0C`) used by prog 0. A flash tool using prog 0 should use the `ecu_type`
+node's module byte from the script map, not these internal codes.
 
 ---
 
