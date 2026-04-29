@@ -9,10 +9,10 @@ Tesla Model 3 diagnostics tools for CAN
 
 ### `diag_tool.py` — Interactive diagnostic terminal
 
-Interactive terminal for exploring ECU state. Connects to a node, reads identity on startup, then lets you read DIDs by name (with tab completion), run routines by name or hex ID, switch sessions, and trigger a firmware update — all in one session.
+Interactive terminal for exploring ECU state. When run without `--node`, opens a pre-connection menu where you can scan the bus for live nodes before connecting. Once connected, reads identity on startup then lets you read DIDs by name (with tab completion), run routines by name or hex ID, switch sessions, and trigger a firmware update — all in one session.
 
 ```
-python diag_tool.py --channel vcan0                          # picks node interactively
+python diag_tool.py --channel vcan0                          # opens pre-connection menu (scan / connect)
 python diag_tool.py --node PCS --channel vcan0
 python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 ```
@@ -21,12 +21,20 @@ python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 
 | Flag                | Default     | Description                                                       |
 | ------------------- | ----------- | ----------------------------------------------------------------- |
-| `--node`, `-n`      | —           | ECU node name. Prompted interactively if omitted.                 |
+| `--node`, `-n`      | —           | ECU node name. Opens pre-connection menu if omitted.              |
 | `--channel`, `-c`   | `vcan0`     | CAN interface                                                     |
 | `--interface`, `-i` | `socketcan` | python-can interface type                                         |
 | `--artifacts`, `-a` | —           | Path to `seed_artifacts_v2` (needed for DFU; prompted if missing) |
 
-**Commands**
+**Pre-connection commands** (shown when `--node` is omitted)
+
+| Command          | Description                                          |
+| ---------------- | ---------------------------------------------------- |
+| `scan`           | Probe all known nodes on the bus for TesterPresent   |
+| `connect <node>` | Connect to a node by name                            |
+| `quit`           | Exit                                                 |
+
+**Connected commands**
 
 | Command       | Description                                                                            |
 | ------------- | -------------------------------------------------------------------------------------- |
