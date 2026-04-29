@@ -1,4 +1,4 @@
-# tesla-m3-diagnostics
+# tm3-diagnostics
 
 Tesla Model 3 diagnostics tools for CAN
 
