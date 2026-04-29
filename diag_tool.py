@@ -376,6 +376,7 @@ def _routine_menu(sess, cfg) -> None:
 
 def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
     from uds_local.client import UdsError
+    from flash_tool import run_flash
 
     _hdr(f"Firmware update (DFU) — {cfg.name}")
 
@@ -387,29 +388,10 @@ def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
         print(f"  Artifacts directory not found: {artifacts_dir}")
         return
 
-    force_raw = input("  Skip identity mismatch check? [y/N] ").strip().lower()
-    force = force_raw == "y"
+    force = input("  Skip identity mismatch check? [y/N] ").strip().lower() == "y"
 
     try:
-        from flash_tool import phase1_identity, phase2_firmware_selection, phase3_preflight, phase4_flash
-
-        _hdr("Phase 1: Identity")
-        identity = phase1_identity(sess, cfg.name)
-
-        _hdr("Phase 2: Firmware selection")
-        selected = phase2_firmware_selection(artifacts_dir, identity, cfg.name)
-
-        _hdr("Phase 3: Pre-flight verification")
-        phase3_preflight(artifacts_dir, selected, identity, force)
-
-        confirm = input("\n  Proceed with flashing? [y/N] ").strip().lower()
-        if confirm != "y":
-            print("  Aborted.")
-            return
-
-        _hdr("Phase 4: Flashing")
-        phase4_flash(sess, artifacts_dir, selected)
-
+        run_flash(sess, artifacts_dir, cfg.name, force=force)
     except SystemExit:
         print("  DFU aborted.")
     except UdsError as e:

@@ -275,6 +275,23 @@ def phase4_flash(
             print("  Flash complete.")
 
 
+def run_flash(
+    sess: UdsSession,
+    artifacts_dir: Path,
+    node_name: str,
+    force: bool = False,
+) -> None:
+    """Run all four flash phases against an already-open UdsSession."""
+    identity = phase1_identity(sess, node_name)
+    selected = phase2_firmware_selection(artifacts_dir, identity, node_name)
+    phase3_preflight(artifacts_dir, selected, identity, force)
+    confirm = input("\nProceed with flashing? [y/N] ").strip().lower()
+    if confirm != "y":
+        print("Aborted by user.")
+        return
+    phase4_flash(sess, artifacts_dir, selected)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Tesla Model 3 ECU firmware flashing tool",
@@ -345,22 +362,15 @@ def main() -> int:
 
         with UdsSession(cfg, args.channel, interface=args.interface) as sess:
             sess.diagnostic_session(0x01)
-            identity = phase1_identity(sess, args.node)
-            selected = phase2_firmware_selection(
-                artifacts_dir, identity, args.node
-            )
-            phase3_preflight(artifacts_dir, selected, identity, args.force)
 
             if args.dry_run:
+                identity = phase1_identity(sess, args.node)
+                selected = phase2_firmware_selection(artifacts_dir, identity, args.node)
+                phase3_preflight(artifacts_dir, selected, identity, args.force)
                 phase4_dry_run(artifacts_dir, selected)
                 return 0
 
-            confirm = input("\nProceed with flashing? [y/N] ").strip().lower()
-            if confirm != "y":
-                print("Aborted by user.")
-                return 0
-
-            phase4_flash(sess, artifacts_dir, selected)
+            run_flash(sess, artifacts_dir, args.node, force=args.force)
 
     except KeyboardInterrupt:
         print("\nAborted.")
