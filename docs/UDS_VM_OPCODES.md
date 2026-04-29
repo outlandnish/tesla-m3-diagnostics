@@ -1,0 +1,145 @@
+# hashpicker_sim UDS VM Opcode Table
+
+Reverse engineered from `hashpicker_sim` (x86-64 Linux ELF, image base `0x00400000`).
+
+The VM bytecode executor at `FUN_0040a743` (`0x0040a743`) dispatches through a function
+pointer table (`uds_commands_pointer`) at `0x006508c0`. Each entry is 8 bytes (pointer-sized);
+null entries are unsupported opcodes. The table covers indices 0–40.
+
+The VM provides a scripting layer over ISO 14229 (UDS) — bytecode scripts drive ECU
+identification, session control, and firmware flashing by sequencing these opcodes.
+
+Each bytecode instruction is 2 bytes: `[opcode] [operand]`. The executor logs each
+instruction as `ecu:<name> [depth/pc] : <mnemonic>(operand)` using the parallel mnemonic
+string table (`uds_commands`) at `0x00650a20`.
+
+---
+
+## Control Flow Pseudo-opcodes (≥ 0x29)
+
+These are handled inline by the executor loop before dispatch, not through the table.
+
+| Byte | Name | Behavior |
+|------|------|----------|
+| `0x29` | `BRANCH_IF_NEG` | If `context[0x10]` bit 15 set: clear it, advance PC by 1. Else: PC -= operand (backward branch). Invalid if target < current PC → error `0x130000`. |
+| `0x2A` | `BRANCH_IF_POS` | If `context[0x10]` bit 15 set: clear it, advance PC by 1. Else: PC += operand (forward branch). |
+| `0x2B` | `CALL` | Push frame; load bytecode pointer from `PTR_DAT_00650ba0[operand]`. Max 8 levels deep (overflow → error `0x1b0000`). |
+| `0x2C` | `RET` | Pop frame and return to caller. Underflow on depth 0 → error `0x1c0000`. |
+
+---
+
+## Dispatch Table (`uds_commands_pointer`, `0x006508c0`)
+
+| Opcode | Address | Mnemonic | Behavior |
+|--------|---------|----------|----------|
+| 0 | `0x00402514` | `enterBootloader` | Dispatches to `PTR_FUN_00650740[operand]` — 5 ECUReset/bootloader-trigger variants (see below) |
+| 1 | `0x0040973d` | `varifyCompAndFirmwareType` | ReadDataByIdentifier (0x22) DID `0x101`; reads 3 bytes; validates response byte against operand; stores result byte in `context+2`; error `0x10000\|response_byte` on mismatch, `0x140000` on wrong response length |
+| 2 | `0x0040c090` | `securityAccess` | SecurityAccess (0x27): requests seed with level from `DAT_00650e08[operand×16]`, computes key via `PTR_FUN_00650e00[operand]`, sends key. tesla_hash variant. |
+| 3 | `0x0040a100` | `setSecurityAccessLevel` | Internal — writes operand byte into `context+2` (no UDS frame sent) |
+| 4 | `0x0040c2e9` | `securityAccessPektron` | SecurityAccess (0x27): always uses seed level 5, key computed via `FUN_0040be8e` (pektron variant) |
+| 5 | `0x00409843` | `moduleToProgram` | DiagnosticSessionControl (0x10) subfunction `0x02` (programming session); session type overridable via `context+0x29` |
+| 6 | `0x004098ff` | `netSetTimeout` | Sets P2 = operand×1000 ms, P2* = operand×2000 ms on the CAN handle |
+| 7 | `0x004099be` | `netSetCentiSecTimeout` | Sets P2 = operand×10 ms, P2* = operand×20 ms |
+| 8 | `0x0040934c` | `reset` | ECUReset (0x11): operand 0 = soft reset (no response wait), 1 = hard reset (wait response), 2 = hard reset with 3 retries + 10 s delay each |
+| 9 | `0x00409a7f` | `initializeEraseModule` | RoutineControl (0x31) start routine `0xFF00` (EraseMemory); operand 1 = accept non-standard response count |
+| 10 | `0x00409b93` | `transferData` | TransferData (0x36): dispatches BHX format or HEX format based on context flags bit 2 |
+| 11 | `0x004120b2` | `checkModuleProgrammedCorrectly` | RoutineControl (0x31) start routine `0x201`; nonzero response byte → error `0x17xxxx` |
+| 12 | `0x004121ba` | `checkCorrectComponentAndRev` | RoutineControl (0x31) start routine `0x202`; nonzero response byte → error `0x160000` |
+| 13 | `0x0040954a` | `diagnosticSession` | DiagnosticSessionControl (0x10) with operand as session type (1–4 valid); logs default and enhanced timeouts |
+| 14 | `0x00412620` | `boardPartSerialNumberGet` | ReadDataByIdentifier (0x22) for DIDs `0xF012`/`0xF013`/`0xF014`/`0xF015` (and optionally `0xF030`/`0xF031`); writes results to `modinfo.log` |
+| 15 | `0x00403d7d` | `acquireHardwareID` | Reads hardware ID DID based on operand (0–3); operand 2 or 3 with specific conditions triggers ECUReset after read |
+| 16 | `0x004039f6` | `AcqAppsSubComponentHwID` | ReadDataByIdentifier using DID from a sub-component type map (`0xF08`–`0xF13`); stores 4-byte result in `context+0x64`, sets context flag bit 1 |
+| 17 | `0x0041181e` | `udsGetVersion` | ReadDataByIdentifier using DID stored in `context+0x64`; extracts version bytes, stores as integer or hash in `context+0x64`; sets context flag bit 1 |
+| 18 | `0x00411be6` | `infoMsgGetVersion` | Reads version fields from a data table at `DAT_006513e0` indexed by operand (0–7); stores into `context+100`, sets context flag bit 1 |
+| 19 | *(null)* | — | Unsupported |
+| 20 | `0x0040923f` | `sleep100ms` | Internal — sleeps operand × 100 ms (no UDS frame sent) |
+| 21 | `0x0040a54b` | `otaStateRoutineControl` | RoutineControl (0x31): routine ID from `DAT_006508a0[operand×2]`; validates response based on session type in `context+0x29` |
+| 22 | `0x0040674b` | `channelPowerRailIOControl` | IOCBI — enables sub-ECU power rail; selects entry from table at `DAT_0043c120` using `context+0x29` as index (operand unused) |
+| 23 | `0x0040a01b` | `vcFrontLockIOControl` | InputOutputControlByIdentifier (0x2F) DID `0x218`, 3 control bytes, operand as subfunction; IOCBI for VCFRONT door lock rail |
+| 24 | `0x00409dd8` | `vcWaitForOTAMode` | RoutineControl `0x540` start then stop; polls until response byte == 2 (OTA mode active); up to 5 attempts (2 if dry-run flag set) |
+| 25 | `0x0040a3c9` | `ibstPowerControl` | RoutineControl (0x31) `0x543` with operand as subfunction; retries up to 3 times with 1 s delay |
+| 26 | `0x0040a16e` | `contextSwitch` | Internal — saves current handle/node to `context+3`/`context+5`, opens new handle to node `operand`, stores in `context+0`/`context+2` |
+| 27 | `0x0040a31f` | `restoreContext` | Internal — releases current handle, restores saved handle/node from `context+3`/`context+5` into `context+0`/`context+2`, clears `context+3` |
+| 28 | *(null)* | — | Unsupported |
+| 29 | `0x0040904c` | *(no mnemonic)* | ClearDiagnosticInformation (0x14) with `0xFFFFFF` mask: operand 0 = single attempt, operand 1 = up to 4 retries with ECUReset between each |
+| 30 | `0x004127ea` | *(no mnemonic)* | Internal — OR operand byte into `context+0x22` (VM execution flags) |
+| 31 | `0x00412767` | *(no mnemonic)* | Internal — AND NOT operand byte into `context+0x22` |
+| 32 | `0x00411d47` | *(no mnemonic)* | ReadDataByIdentifier (0x22) DID `0xF100`; reads flash count; compares against limit in `DAT_00651408[operand×3]`; operand 0–2 selects limit entry, operand ≥3 → error `0x120000`; over-limit → error `0x270000` |
+| 33 | *(null)* | — | Unsupported |
+| 34 | *(null)* | — | Unsupported |
+| 35 | `0x004067f5` | *(no mnemonic)* | IOCBI — enables sub-ECU power rail; selects entry from table at `DAT_0043c120` using `context+0x29` as index |
+| 36 | `0x00412cc5` | *(no mnemonic)* | ReadDataByIdentifier (0x22), DIDs `0x561`–`0x563` → writes intrusion sensor serial/compensation/part to `modinfo.log` |
+| 37 | `0x00411609` | *(no mnemonic)* | RoutineControl (0x31), routine `0x601` |
+| 38 | `0x004115a2` | *(no mnemonic)* | Stub — always returns 0 |
+| 39 | `0x00412ec6` | *(no mnemonic)* | RoutineControl (0x31): routine ID from `DAT_006515b4[operand×2]` (operand 0 or 1 only; ≥2 → error `0x120000`); validates response based on session byte in `context+0x29`; error `0x250000` on validation failure |
+| 40 | `0x004092c6` | *(no mnemonic)* | Internal — OR bit 0 into `context+0x22`; returns `0x230000` if operand == 1, else 0 |
+| 41+ | *(null)* | — | End of table |
+
+---
+
+## `enterBootloader` Variant Table (`PTR_FUN_00650740`)
+
+Opcode 0 dispatches to one of 5 functions indexed by operand:
+
+| Operand | Address | Behavior |
+|---------|---------|----------|
+| 0 | `0x00402120` | Wait for boot message change (up to 334×10 ms), then reconnect with TesterPresent retries (up to 14) |
+| 1 | `0x0040225d` | ECUReset hard reset (subfunction 0x01), wait for response |
+| 2 | `0x004022e1` | ECUReset hard reset (subfunction 0x01), wait for response (identical to variant 1) |
+| 3 | `0x00402365` | ECUReset hard reset (subfunction 0x01), wait for response (identical to variant 1) |
+| 4 | `0x004023e9` | RoutineControl (0x31) start routine `0x0203`; if response length == 1, writes 3 bytes `0xFF 0xFF 0xFF` via WriteMemoryByAddress — vendor bootloader trigger |
+
+---
+
+## CALL Subroutine Table (`PTR_DAT_00650ba0`)
+
+The `CALL` opcode (0x2B) loads a bytecode subroutine pointer from this table.
+Subroutine N is at `PTR_DAT_00650ba0[N]` (8 bytes per entry).
+
+| Index | Address | Decoded Sequence |
+|-------|---------|------------------|
+| 0 | `0x00650b90` | `06 01 2C 00` → `netSetTimeout(1)`, RET |
+| 1 | `0x00650b98` | `05 00 09 00 0A 00 2C 00` → `moduleToProgram(0)`, `initializeEraseModule(0)`, `transferData(0)`, RET — **full programming session + erase + download** |
+| 2 | `0x00651388` | `03 03 02 00 18 00 19 01 2C 00` → `setSecurityAccessLevel(3)`, `securityAccess(0)`, `vcWaitForOTAMode(0)`, `ibstPowerControl(1)`, RET |
+| 3 | `0x00651398` | `03 03 02 00 19 02 2C 00` → `setSecurityAccessLevel(3)`, `securityAccess(0)`, `ibstPowerControl(2)`, RET |
+| 4 | `0x006513a0` | `1A 19 0D 03 03 03 02 00 18 00 17 01 1B 00 2C 00` → `restoreContext(25)`, `diagnosticSession(3)`, `setSecurityAccessLevel(3)`, `securityAccess(0)`, `vcWaitForOTAMode(0)`, `contextSwitch(1)`, `initializeEraseModule(0)`, RET |
+| 5 | `0x006513b0` | `1A 19 0D 03 03 03 02 00 18 00 17 00 1B 00 2C 00` → `restoreContext(25)`, `diagnosticSession(3)`, `setSecurityAccessLevel(3)`, `securityAccess(0)`, `vcWaitForOTAMode(0)`, `contextSwitch(0)`, `initializeEraseModule(0)`, RET |
+| 6–7 | *(null)* | Unsupported |
+| 8+ | `0x0043ab01`+ | Error/status string table (not bytecode — `CALL` into these is invalid) |
+
+> **Note on subroutines 4 & 5:** The first byte `0x1A` = opcode 26 = `contextSwitch`, but it appears
+> first — likely these are called after an external context switch has already been set up, and this
+> preamble restores then re-enters a specific node. The `0x19` operand to `restoreContext` and
+> `diagnosticSession` is decimal 25 / `0x19` — passed as the operand byte, not a nested opcode.
+
+---
+
+## `DAT_006515b4` — Routine ID Table (Opcode 39)
+
+Opcode 39 reads a routine ID as `uint16` from `DAT_006515b4 + operand*2`:
+
+| Operand | Routine ID | Notes |
+|---------|-----------|-------|
+| 0 | `0x0402` | RoutineControl start; validates response: session 1 → must return 0, session 3 → must return non-zero; error `0x250000` on failure |
+| 1 | `0x0403` | RoutineControl start; no response validation |
+
+---
+
+## VM Architecture Notes
+
+- Executor: `FUN_0040a743` at `0x0040a743`
+- Instruction format: 2 bytes — `[opcode] [operand]`
+- Mnemonic table: `uds_commands` at `0x00650a20` (one string pointer per opcode, indexed by opcode byte)
+- Dispatch table: `uds_commands_pointer` at `0x006508c0` (one function pointer per opcode)
+- Control flow: `CALL` (`0x2B`), `RET` (`0x2C`), `BRANCH_IF_NEG` (`0x29`), `BRANCH_IF_POS` (`0x2A`)
+- Call stack: 8 levels deep; overflow → `0x1b0000`, underflow → `0x1c0000`
+- Unsupported opcode → terminates with "Invalid program, terminated unexpectedly" + `0x130000`
+- Invalid backward branch target → error `0x130000`
+- Context flags at `context+0x22` (byte): bit 0 = context active, bit 1 = stop-after-one, bit 2 = continue-on-error, bit 3 = quiet/no-log
+- Condition flag: bit 15 of `context+0x10` (ushort) — set by opcode results, consumed by branch opcodes
+- Session type override: byte at `context+0x29` — many opcodes read this instead of the operand
+- BHX vs HEX dispatch: context flags bit 2 of `context+0x20` selects upload format in opcode 10
+- Context switch state: current handle at `context+0`, node ID at `context+2`; saved handle at `context+3`, saved node at `context+5`
+
+See [FIRMWARE_UPDATE.md](FIRMWARE_UPDATE.md) for the full UDS flashing protocol and
+[README.md](README.md) for the BHX file format specification.
