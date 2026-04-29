@@ -118,10 +118,10 @@ Subroutine N is at `PTR_DAT_00650ba0[N]` (8 bytes per entry).
 
 Opcode 39 reads a routine ID as `uint16` from `DAT_006515b4 + operand*2`:
 
-| Operand | Routine ID | Notes                                                                                                                                                                                                  |
-| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 0       | `0x0402`   | RoutineControl; subfunction from `context+0x29`; validates response: session `0x01` → error if response byte == `0x01`; session `0x03` → error if response byte != `0x00`; error `0x250000` on failure |
-| 1       | `0x0403`   | RoutineControl; subfunction from `context+0x29`; no response validation                                                                                                                                |
+| Operand | Routine ID | Notes                                                                                                                                                                                                                          |
+| ------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0       | `0x0204`   | Inhibit contactor — RoutineControl `31 <module> 02 04`; validates response: if `context+0x29 == 0x01` and response byte == `0x01` → error `0x250000`; if `context+0x29 == 0x03` and response byte != `0x00` → error `0x250000` |
+| 1       | `0x0304`   | Inhibit contactor + open — RoutineControl `31 <module> 03 04`; on success calls `hv_maybe_set_contactor_state` with state=0 (open), polling DID `0x0414` until contactors report open                                          |
 
 ---
 
