@@ -26,7 +26,8 @@ SegmentHeader (20 bytes):
   [4:8]   uint32  version = 1
   [8:12]  uint32  start_address        (flash destination address)
   [12:16] uint32  length               (segment payload byte count)
-  [16:20] uint32  crc32                (CRC-32 of the segment data, standard poly)
+  [16:20] uint32  crc32                (CRC-32 of the segment data,
+                                        standard poly)
 
 Notes
 -----
@@ -47,12 +48,11 @@ import struct
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
-
 
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Segment:
@@ -231,7 +231,10 @@ def _cmd_info(path: Path) -> None:
     bhx = parse_file(path)
     print(f"File  : {path}")
     print(
-        f"GHDR  : version={bhx.ghdr_version}  total_payload={bhx.total_payload_bytes:#010x} ({bhx.total_payload_bytes})")
+        f"GHDR  : version={bhx.ghdr_version}  "
+        f"total_payload={bhx.total_payload_bytes:#010x} "
+        f"({bhx.total_payload_bytes})"
+    )
     if bhx.ghdr_version == 2:
         print(f"        total_size={bhx.ghdr_total_size:#010x}")
     for i, seg in enumerate(bhx.segments, 1):
@@ -268,7 +271,11 @@ def _cmd_create(addr_bin_pairs: list[str], out_path: Path) -> None:
     bhx = from_binary_segments(segments)
     build_file(bhx, out_path)
     print(
-        f"Wrote {out_path}  ({out_path.stat().st_size} bytes, {len(segments)} segment(s))")
+        (
+            f"Wrote {out_path}  "
+            f"({out_path.stat().st_size} bytes, {len(segments)} segment(s))"
+        )
+    )
 
 
 if __name__ == "__main__":
