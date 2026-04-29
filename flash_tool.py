@@ -19,12 +19,13 @@ _ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
 _ODJ_DIR = _DATA_DIR / "odj"
 
 # DIDs used during identity discovery
-_DID_BOOTLOADER_VERSION = 0xF180  # 19 bytes: MODULES, COMPONENT_ID, PCBA_ID, ASSEMBLY_ID, USAGE_ID, ...
+# 19 bytes: MODULES, COMPONENT_ID, PCBA_ID, ASSEMBLY_ID, USAGE_ID, ...
+_DID_BOOTLOADER_VERSION = 0xF180
 
 # Flash sequence routine IDs (from odin-architecture.md)
-_ROUTINE_ERASE_FLASH           = 0xFF00
-_ROUTINE_CHECK_COMP_REV        = 0x0202
-_ROUTINE_VERIFY_CRC            = 0x0201
+_ROUTINE_ERASE_FLASH = 0xFF00
+_ROUTINE_CHECK_COMP_REV = 0x0202
+_ROUTINE_VERIFY_CRC = 0x0201
 
 
 def _abort(msg: str) -> None:
@@ -44,13 +45,14 @@ def phase1_identity(sess, node_name: str) -> dict:
 
     f180 = sess.read_did(_DID_BOOTLOADER_VERSION)
     if len(f180) < 6:
-        _abort(f"DID 0xF180 response too short ({len(f180)} bytes, expected >=6)")
+        _abort(
+            f"DID 0xF180 response too short ({len(f180)} bytes, expected >=6)")
 
     # Layout: [MODULES:1][COMPONENT_ID:2][PCBA_ID:1][ASSEMBLY_ID:1][USAGE_ID:1][...]
     component_id = (f180[1] << 8) | f180[2]
-    pcba_id      = f180[3]
-    assembly_id  = f180[4]
-    usage_id     = f180[5]
+    pcba_id = f180[3]
+    assembly_id = f180[4]
+    usage_id = f180[5]
 
     # version_map packed key: PPAA00UU (big-endian 32-bit)
     packed = (pcba_id << 24) | (assembly_id << 16) | usage_id
@@ -101,8 +103,10 @@ def phase2_firmware_selection(
     else:
         print(f"  Found {len(matches)} firmware options:")
         for i, e in enumerate(matches):
-            cond_str = ",".join(f"{k}={v}" for k, v in e.conditions.items()) or "*"
-            print(f"  [{i}] {e.src_path} → {e.dest_name}  crc={e.crc}  cond={cond_str}")
+            cond_str = ",".join(
+                f"{k}={v}" for k, v in e.conditions.items()) or "*"
+            print(
+                f"  [{i}] {e.src_path} → {e.dest_name}  crc={e.crc}  cond={cond_str}")
         # If multiple are different dest_names (CPU1/CPU2), use all; else ask user
         dest_names = {e.dest_name for e in matches}
         if len(dest_names) == len(matches):
@@ -127,32 +131,52 @@ def phase2_firmware_selection(
     return selected
 
 
+def _decode_pcs_identity(data: bytes) -> dict | None:
+    """Decode the 32-byte Tesla C28x ECU identity header from segment data.
+
+    Returns None if the data doesn't match the expected layout (words 4 and 5
+    must have 0xFFFF in the low half).
+    """
+    import struct
+    if len(data) < 32:
+        return None
+    w0, w1, _, _, w4, w5 = struct.unpack_from(">IIIIII", data, 0)
+    if (w4 & 0xFFFF) != 0xFFFF or (w5 & 0xFFFF) != 0xFFFF:
+        return None
+    return {
+        "component_id": (w0 >> 16) & 0xFFFF,
+        "assembly_id": (w0 >> 8) & 0xFF,
+        "pcba_id": w0 & 0xFF,
+        "usage_id": (w1 >> 16) & 0xFFFF,
+    }
+
+
 def phase3_preflight(artifacts_dir: Path, selected: list, identity: dict, force: bool) -> None:
     """Cross-check BHX identity header against DID reads."""
-    from bhx_parser import parse_bhx
+    import bhx
 
     _print_section("Phase 3: Pre-flight Verification")
 
     for entry in selected:
         src = artifacts_dir / entry.src_path
-        report = parse_bhx(src)
-        for sec in report["sections"]:
-            ident = sec.get("identity")
+        bhx_file = bhx.parse_file(src)
+        found_identity = False
+        for seg in bhx_file.segments:
+            ident = _decode_pcs_identity(seg.data)
             if not ident:
                 continue
-            # component_id is hex string like "0x001b"
-            bhx_component_id = int(ident["component_id"], 16)
-            bhx_pcba_id = ident["pcba_id"]
-            bhx_assembly_id = ident["assembly_id"]
-            bhx_usage_id = ident["usage_id"]
-
+            found_identity = True
+            bhx_component_id = ident["component_id"]
             mismatches = []
-            if bhx_pcba_id != identity["pcba_id"]:
-                mismatches.append(f"PCBA_ID: BHX={bhx_pcba_id} vs ECU={identity['pcba_id']}")
-            if bhx_assembly_id != identity["assembly_id"]:
-                mismatches.append(f"ASSEMBLY_ID: BHX={bhx_assembly_id} vs ECU={identity['assembly_id']}")
-            if bhx_usage_id != identity["usage_id"]:
-                mismatches.append(f"USAGE_ID: BHX={bhx_usage_id} vs ECU={identity['usage_id']}")
+            if ident["pcba_id"] != identity["pcba_id"]:
+                mismatches.append(
+                    f"PCBA_ID: BHX={ident['pcba_id']} vs ECU={identity['pcba_id']}")
+            if ident["assembly_id"] != identity["assembly_id"]:
+                mismatches.append(
+                    f"ASSEMBLY_ID: BHX={ident['assembly_id']} vs ECU={identity['assembly_id']}")
+            if ident["usage_id"] != identity["usage_id"]:
+                mismatches.append(
+                    f"USAGE_ID: BHX={ident['usage_id']} vs ECU={identity['usage_id']}")
 
             if mismatches:
                 for m in mismatches:
@@ -162,19 +186,21 @@ def phase3_preflight(artifacts_dir: Path, selected: list, identity: dict, force:
                 else:
                     print("  (--force: proceeding despite mismatch)")
             else:
-                print(f"  {entry.src_path}: identity OK (component_id=0x{bhx_component_id:04X})")
+                print(
+                    f"  {entry.src_path}: identity OK (component_id=0x{bhx_component_id:04X})")
+        if not found_identity:
+            print(f"  {entry.src_path}: no identity header found, skipping pre-flight check")
 
 
 def phase4_flash(sess, artifacts_dir: Path, selected: list) -> None:
     """Execute the 10-step UDS flash sequence for each firmware file."""
-    from bhx_parser import parse_bhx
+    import bhx
 
     for fw_index, entry in enumerate(selected):
         _print_section(f"Phase 4: Flash Sequence — {entry.dest_name}")
 
         src = artifacts_dir / entry.src_path
-        report = parse_bhx(src)
-        raw_blob = src.read_bytes()
+        bhx_file = bhx.parse_file(src)
 
         print("  Starting TesterPresent thread...")
         sess.start_tester_present()
@@ -196,24 +222,21 @@ def phase4_flash(sess, artifacts_dir: Path, selected: list) -> None:
             print("  Step 4: RoutineControl CHECK_CORRECT_COMPONENT_AND_REV (0x0202)")
             sess.routine_control(_ROUTINE_CHECK_COMP_REV)
 
-            # Steps 5-7: Per SHDR section
-            for sec in report["sections"]:
-                sec_idx = sec["index"]
-                target = int(sec["target"], 16)
-                size = sec["size"]
-                payload_offset = int(sec["offset_in_file"], 16) + 20
-                payload = raw_blob[payload_offset:payload_offset + size]
-
-                print(f"  [Section {sec_idx}] target=0x{target:08X} size={size} bytes")
+            # Steps 5-7: Per segment
+            for seg_idx, seg in enumerate(bhx_file.segments):
+                print(
+                    f"  [Segment {seg_idx}] target=0x{seg.start_address:08X} size={seg.length} bytes")
 
                 # Step 5: RequestDownload
-                print(f"  Step 5: RequestDownload addr=0x{target:08X} size={size}")
-                max_block_len = sess.request_download(target, size)
+                print(
+                    f"  Step 5: RequestDownload addr=0x{seg.start_address:08X} size={seg.length}")
+                max_block_len = sess.request_download(seg.start_address, seg.length)
                 print(f"         maxBlockLen={max_block_len}")
 
                 # Step 6: TransferData
-                print(f"  Step 6: TransferData ({size} bytes in chunks of {max_block_len - 2})")
-                sess.transfer_data(payload, max_block_len)
+                print(
+                    f"  Step 6: TransferData ({seg.length} bytes in chunks of {max_block_len - 2})")
+                sess.transfer_data(seg.data, max_block_len)
 
                 # Step 7: RequestTransferExit
                 print("  Step 7: RequestTransferExit")
@@ -241,9 +264,12 @@ def main() -> int:
         description="Tesla Model 3 ECU firmware flashing tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--node", "-n", required=True, help="ECU node name (e.g. PCS)")
-    parser.add_argument("--channel", "-c", default="vcan0", help="CAN interface (default: vcan0)")
-    parser.add_argument("--interface", "-i", default="socketcan", help="python-can interface type")
+    parser.add_argument("--node", "-n", required=True,
+                        help="ECU node name (e.g. PCS)")
+    parser.add_argument("--channel", "-c", default="vcan0",
+                        help="CAN interface (default: vcan0)")
+    parser.add_argument("--interface", "-i", default="socketcan",
+                        help="python-can interface type")
     parser.add_argument("--artifacts", "-a", required=True,
                         help="Path to seed_artifacts_v2 directory (contains signed_metadata_map.tsv)")
     parser.add_argument("--force", action="store_true",
@@ -267,7 +293,8 @@ def main() -> int:
             identity = phase1_identity(sess, args.node)
 
             # Phase 2: Select firmware
-            selected = phase2_firmware_selection(artifacts_dir, identity, args.node)
+            selected = phase2_firmware_selection(
+                artifacts_dir, identity, args.node)
 
             # Phase 3: Pre-flight check
             phase3_preflight(artifacts_dir, selected, identity, args.force)
