@@ -28,15 +28,15 @@ _ODJ_DIR = _DATA_DIR / "odj"
 # opcode 21/24 → 0x540  otaStateRoutineControl / vcWaitForOTAMode
 # opcode 25 → 0x543   ibstPowerControl
 # opcode 37 → 0x601   (unnamed)
-# opcode 39 → 0x0402/0x0403  OTA state validation (session-dependent)
+# opcode 39 → 0x0204/0x0304  bmsContactorControl (inhibit / inhibit+open)
 _NAMED_ROUTINES: dict[str, tuple[int, str, bool]] = {
     "erase":              (0xFF00, "initializeEraseModule — EraseMemory", True),
     "verify-crc":         (0x0201, "checkModuleProgrammedCorrectly — CRC verify", False),
     "check-component":    (0x0202, "checkCorrectComponentAndRev", False),
     "ota-wait":           (0x0540, "vcWaitForOTAMode / otaStateRoutineControl", False),
     "ibst-power":         (0x0543, "ibstPowerControl", True),
-    "bms-inhibit":             (0x0204, "bmsContactorControl — inhibit contactor", False),
-    "bms-inhibit-open":        (0x0304, "bmsContactorControl — inhibit + open contactor", False),
+    "bms-contactor-close":     (0x0204, "bmsContactorControl — close contactor", False),
+    "bms-contactor-open":      (0x0304, "bmsContactorControl — open contactor", False),
     "disable-intrusion-sensor": (0x0601, "disableIntrusionSensor", False),
 }
 

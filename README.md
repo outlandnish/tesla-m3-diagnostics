@@ -56,8 +56,8 @@ python tm3diag.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 | `check-component`          | `0x0202`   | `checkCorrectComponentAndRev`                                    |
 | `ota-wait`                 | `0x0540`   | `vcWaitForOTAMode` / `otaStateRoutineControl`                    |
 | `ibst-power`               | `0x0543`   | `ibstPowerControl` (requires security access)                    |
-| `bms-inhibit`              | `0x0204`   | `bmsContactorControl` — inhibit contactor                        |
-| `bms-inhibit-open`         | `0x0304`   | `bmsContactorControl` — inhibit + open contactor                 |
+| `bms-contactor-close`      | `0x0204`   | `bmsContactorControl` — close contactor                          |
+| `bms-contactor-open`       | `0x0304`   | `bmsContactorControl` — open contactor                           |
 | `disable-intrusion-sensor` | `0x0601`   | `disableIntrusionSensor`                                         |
 
 ---
