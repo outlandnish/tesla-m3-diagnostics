@@ -56,9 +56,9 @@ python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 | `check-component`    | `0x0202`   | `checkCorrectComponentAndRev`                                    |
 | `ota-wait`           | `0x0540`   | `vcWaitForOTAMode` / `otaStateRoutineControl`                    |
 | `ibst-power`         | `0x0543`   | `ibstPowerControl` (requires security access)                    |
-| `ota-validate`       | `0x0402`   | OTA state validation (session-dependent response check)          |
-| `ota-validate-noack` | `0x0403`   | OTA state validation (no response check)                         |
-| `routine-0601`       | `0x0601`   | Opcode 37 unnamed routine                                        |
+| `bms-contactor`            | `0x0402`   | `bmsContactorControl` (session-dependent response check)  |
+| `bms-contactor-noack`      | `0x0403`   | `bmsContactorControl` (no response check)                 |
+| `disable-intrusion-sensor` | `0x0601`   | `disableIntrusionSensor`                                  |
 
 ---
 
