@@ -20,11 +20,14 @@ _NODES_JSON = _DATA_DIR / "nodes.json"
 _ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
 _ODJ_DIR = _DATA_DIR / "odj"
 
-# DIDs used during identity discovery
-# 19 bytes: MODULES, COMPONENT_ID, PCBA_ID, ASSEMBLY_ID, USAGE_ID, ...
+# DID 0xF180: bootloader/firmware version — read during identity discovery (phase 1)
+# DID 0x0101: component+firmware type validation — used by VM opcode 1 (varifyCompAndFirmwareType)
 _DID_BOOTLOADER_VERSION = 0xF180
 
-# Flash sequence routine IDs (from odin-architecture.md)
+# Flash sequence routine IDs (hashpicker_sim VM opcodes, UDS_VM_OPCODES.md)
+# opcode 9  → 0xFF00  initializeEraseModule
+# opcode 12 → 0x0202  checkCorrectComponentAndRev
+# opcode 11 → 0x0201  checkModuleProgrammedCorrectly (CRC verify)
 _ROUTINE_ERASE_FLASH = 0xFF00
 _ROUTINE_CHECK_COMP_REV = 0x0202
 _ROUTINE_VERIFY_CRC = 0x0201
@@ -216,12 +219,12 @@ def phase4_flash(sess: UdsSession, artifacts_dir: Path, selected: list) -> None:
             print("  Step 2: SecurityAccess")
             sess.security_access()
 
-            # Step 3: Erase flash (routine 0xFF00, arg=01)
-            print("  Step 3: RoutineControl ERASE_FLASH (0xFF00)")
+            # Step 3: initializeEraseModule — RoutineControl 0xFF00
+            print("  Step 3: RoutineControl initializeEraseModule (0xFF00)")
             sess.routine_control(_ROUTINE_ERASE_FLASH, b"\x01")
 
-            # Step 4: Check component/revision (routine 0x0202)
-            print("  Step 4: RoutineControl CHECK_CORRECT_COMPONENT_AND_REV (0x0202)")
+            # Step 4: checkCorrectComponentAndRev — RoutineControl 0x0202
+            print("  Step 4: RoutineControl checkCorrectComponentAndRev (0x0202)")
             sess.routine_control(_ROUTINE_CHECK_COMP_REV)
 
             # Steps 5-7: Per segment
@@ -244,8 +247,8 @@ def phase4_flash(sess: UdsSession, artifacts_dir: Path, selected: list) -> None:
                 print("  Step 7: RequestTransferExit")
                 sess.request_transfer_exit()
 
-            # Step 9: Verify CRC (routine 0x0201)
-            print("  Step 9: RoutineControl VERIFY_CRC (0x0201)")
+            # Step 9: checkModuleProgrammedCorrectly — RoutineControl 0x0201
+            print("  Step 9: RoutineControl checkModuleProgrammedCorrectly (0x0201)")
             sess.routine_control(_ROUTINE_VERIFY_CRC)
 
         finally:

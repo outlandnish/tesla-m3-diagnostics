@@ -31,6 +31,7 @@ _SID_TD  = 0x36   # TransferData
 _SID_RTE = 0x37   # RequestTransferExit
 _SID_ER  = 0x11   # ECUReset
 _SID_TP  = 0x3E   # TesterPresent
+_SID_CDI = 0x14   # ClearDiagnosticInformation
 
 _RC_START = 0x01
 
@@ -161,6 +162,12 @@ class UdsSession:
     def ecu_reset(self, reset_type: int = 0x01) -> None:
         resp = self._send_raw([_SID_ER, reset_type])
         self._check_positive(resp, _SID_ER)
+
+    def clear_dtc(self, group: int = 0xFFFFFF) -> None:
+        """ClearDiagnosticInformation (0x14) — group 0xFFFFFF clears all DTCs."""
+        b = group.to_bytes(3, "big")
+        resp = self._send_raw([_SID_CDI, b[0], b[1], b[2]])
+        self._check_positive(resp, _SID_CDI)
 
     # ------------------------------------------------------------------
     # Internal helpers

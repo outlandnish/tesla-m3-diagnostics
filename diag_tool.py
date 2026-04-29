@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import readline
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +20,35 @@ _NODES_JSON = _DATA_DIR / "nodes.json"
 _ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
 _ODJ_DIR = _DATA_DIR / "odj"
 
-# Well-known routine IDs from hashpicker_sim VM opcode analysis
-_NAMED_ROUTINES: dict[str, tuple[int, str]] = {
-    "erase":              (0xFF00, "EraseMemory"),
-    "check-deps":         (0xFF01, "CheckProgrammingDependencies"),
-    "verify":             (0xFF02, "CheckMemory / CRC verify"),
-    "disable-intrusion":  (0x0601, "DisableIntrusionSensor"),
+# Named routines from hashpicker_sim VM opcode table (UDS_VM_OPCODES.md).
+# Format: name → (routine_id, description, requires_security_access)
+# opcode 9  → 0xFF00  initializeEraseModule
+# opcode 11 → 0x0201  checkModuleProgrammedCorrectly (CRC verify)
+# opcode 12 → 0x0202  checkCorrectComponentAndRev
+# opcode 21/24 → 0x540  otaStateRoutineControl / vcWaitForOTAMode
+# opcode 25 → 0x543   ibstPowerControl
+# opcode 37 → 0x601   (unnamed)
+# opcode 39 → 0x0402/0x0403  OTA state validation (session-dependent)
+_NAMED_ROUTINES: dict[str, tuple[int, str, bool]] = {
+    "erase":              (0xFF00, "initializeEraseModule — EraseMemory", True),
+    "verify-crc":         (0x0201, "checkModuleProgrammedCorrectly — CRC verify", False),
+    "check-component":    (0x0202, "checkCorrectComponentAndRev", False),
+    "ota-wait":           (0x0540, "vcWaitForOTAMode / otaStateRoutineControl", False),
+    "ibst-power":         (0x0543, "ibstPowerControl", True),
+    "ota-validate":       (0x0402, "OTA state validation (session-dependent)", False),
+    "ota-validate-noack": (0x0403, "OTA state validation (no response check)", False),
+    "routine-0601":       (0x0601, "Opcode 37 unnamed routine", False),
 }
+
+# DIDs read by opcode 14 (boardPartSerialNumberGet) → modinfo fields
+_BOARD_PART_DIDS: list[tuple[int, str]] = [
+    (0xF012, "BoardPartNumber"),
+    (0xF013, "BoardSerialNumber"),
+    (0xF014, "BoardHardwareRevision"),
+    (0xF015, "BoardSoftwareRevision"),
+    (0xF030, "BoardPartNumber2"),
+    (0xF031, "BoardSerialNumber2"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -270,12 +291,14 @@ def _routine_menu(sess, cfg) -> None:
             return
         if raw.lower() == "list":
             print()
-            for name, (rid, desc) in _NAMED_ROUTINES.items():
-                print(f"    0x{rid:04X}  {name:<24} {desc}")
+            for name, (rid, desc, needs_sa) in _NAMED_ROUTINES.items():
+                sa_str = "  [security access]" if needs_sa else ""
+                print(f"    0x{rid:04X}  {name:<24} {desc}{sa_str}")
             continue
 
+        needs_sa = False
         if raw.lower() in _NAMED_ROUTINES:
-            routine_id, desc = _NAMED_ROUTINES[raw.lower()]
+            routine_id, desc, needs_sa = _NAMED_ROUTINES[raw.lower()]
             print(f"  → 0x{routine_id:04X}  {desc}")
         elif raw.lower().startswith("0x"):
             try:
@@ -287,6 +310,15 @@ def _routine_menu(sess, cfg) -> None:
         else:
             print(f"  Unknown routine: {raw!r}")
             continue
+
+        if needs_sa:
+            print("  Routine requires security access — authenticating...")
+            try:
+                sess.diagnostic_session(0x02)
+                sess.security_access()
+            except UdsError as e:
+                print(f"  Security access failed: {e}")
+                continue
 
         arg_raw = input("  Arg bytes (hex, empty for none): ").strip()
         try:
@@ -355,16 +387,21 @@ def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
 # ---------------------------------------------------------------------------
 
 def _main_menu(sess, cfg, odj_fields: dict[str, Any], artifacts_dir: Path | None) -> None:
-    _setup_completion(["dids", "routine", "dfu", "session", "reset", "quit"])
+    _setup_completion([
+        "dids", "routine", "board-parts", "clear-dtc",
+        "dfu", "session", "reset", "quit",
+    ])
 
     while True:
         _hdr(f"{cfg.name}  —  Main menu")
-        print("  dids      Read DIDs interactively")
-        print("  routine   Run a routine control")
-        print("  dfu       Firmware update")
-        print("  session   Switch diagnostic session")
-        print("  reset     ECU hard reset")
-        print("  quit      Disconnect and exit")
+        print("  dids        Read DIDs interactively")
+        print("  routine     Run a routine control")
+        print("  board-parts Read board part/serial DIDs (0xF012–0xF015)")
+        print("  clear-dtc   ClearDiagnosticInformation (0xFFFFFF)")
+        print("  dfu         Firmware update")
+        print("  session     Switch diagnostic session")
+        print("  reset       ECU hard reset")
+        print("  quit        Disconnect and exit")
 
         try:
             cmd = input("\n  > ").strip().lower()
@@ -377,6 +414,10 @@ def _main_menu(sess, cfg, odj_fields: dict[str, Any], artifacts_dir: Path | None
             _did_menu(sess, cfg, odj_fields)
         elif cmd == "routine":
             _routine_menu(sess, cfg)
+        elif cmd == "board-parts":
+            _board_parts_cmd(sess)
+        elif cmd == "clear-dtc":
+            _clear_dtc_cmd(sess)
         elif cmd == "dfu":
             _dfu_menu(sess, cfg, artifacts_dir)
         elif cmd == "session":
@@ -401,6 +442,33 @@ def _session_cmd(sess) -> None:
     try:
         sess.diagnostic_session(mode)
         print(f"  Entered session 0x{mode:02X}")
+    except UdsError as e:
+        print(f"  Error: {e}")
+
+
+def _board_parts_cmd(sess) -> None:
+    """Read board part/serial DIDs (opcode 14 — boardPartSerialNumberGet)."""
+    from uds.client import UdsError
+    print()
+    for did_id, label in _BOARD_PART_DIDS:
+        try:
+            data = sess.read_did(did_id)
+            text = data.decode("ascii", errors="replace").rstrip("\x00")
+            print(f"  0x{did_id:04X}  {label:<32} {text!r}  [{data.hex()}]")
+        except UdsError as e:
+            print(f"  0x{did_id:04X}  {label:<32} Error: {e}")
+
+
+def _clear_dtc_cmd(sess) -> None:
+    from uds.client import UdsError
+    confirm = input(
+        "  ClearDiagnosticInformation (group 0xFFFFFF)? [y/N] "
+    ).strip().lower()
+    if confirm != "y":
+        return
+    try:
+        sess.clear_dtc(0xFFFFFF)
+        print("  DTCs cleared.")
     except UdsError as e:
         print(f"  Error: {e}")
 

@@ -97,12 +97,16 @@ def cmd_routine(args: argparse.Namespace) -> None:
     try:
         routine_id = int(args.routine_id, 16)
     except ValueError:
-        print(f"Error: invalid routine_id: {args.routine_id!r}  (expect hex e.g. 0xFF00)")
+        print(
+            f"Error: invalid routine_id: {args.routine_id!r}"
+            "  (expect hex e.g. 0xFF00)"
+        )
         sys.exit(1)
     arg_bytes = bytes.fromhex(args.arg) if args.arg else b""
     with _make_session(args.node, args.channel, args.interface) as sess:
         result = sess.routine_control(routine_id, arg_bytes)
-    print(f"Routine 0x{routine_id:04X} result: {result.hex() if result else '(empty)'}")
+    result_str = result.hex() if result else "(empty)"
+    print(f"Routine 0x{routine_id:04X} result: {result_str}")
 
 
 def cmd_security_access(args: argparse.Namespace) -> None:
@@ -112,11 +116,17 @@ def cmd_security_access(args: argparse.Namespace) -> None:
         sess.start_tester_present()
         sess.security_access()
         sess.stop_tester_present()
-    print(f"Security access granted for {args.node} (algorithm: {cfg.security_algorithm}).")
+    print(
+        f"Security access granted for {args.node}"
+        f" (algorithm: {cfg.security_algorithm})."
+    )
 
 
 def cmd_session(args: argparse.Namespace) -> None:
-    mode_map = {"default": 0x01, "programming": 0x02, "extended": 0x03, "safety": 0x04}
+    mode_map = {
+        "default": 0x01, "programming": 0x02,
+        "extended": 0x03, "safety": 0x04,
+    }
     mode_arg = args.mode.lower()
     if mode_arg in mode_map:
         mode = mode_map[mode_arg]
@@ -137,20 +147,33 @@ def cmd_reset(args: argparse.Namespace) -> None:
     print(f"ECU reset sent to {args.node}.")
 
 
+def cmd_clear_dtc(args: argparse.Namespace) -> None:
+    with _make_session(args.node, args.channel, args.interface) as sess:
+        sess.clear_dtc(0xFFFFFF)
+    print(f"ClearDiagnosticInformation sent to {args.node} (group 0xFFFFFF).")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Tesla Model 3 UDS diagnostic tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--node", "-n", help="ECU node name (e.g. PCS, CP, RCM)")
-    parser.add_argument("--channel", "-c", default="vcan0", help="CAN interface (default: vcan0)")
-    parser.add_argument("--interface", "-i", default="socketcan", help="python-can interface type")
+    parser.add_argument(
+        "--node", "-n", help="ECU node name (e.g. PCS, CP, RCM)")
+    parser.add_argument(
+        "--channel", "-c", default="vcan0",
+        help="CAN interface (default: vcan0)")
+    parser.add_argument(
+        "--interface", "-i", default="socketcan",
+        help="python-can interface type")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
     # scan
-    p_scan = sub.add_parser("scan", help="Probe all nodes for TesterPresent response")
-    p_scan.add_argument("--timeout", type=float, default=0.1, help="Per-node timeout (s)")
+    p_scan = sub.add_parser(
+        "scan", help="Probe all nodes for TesterPresent response")
+    p_scan.add_argument(
+        "--timeout", type=float, default=0.1, help="Per-node timeout (s)")
     p_scan.set_defaults(func=cmd_scan)
 
     # read-did
@@ -165,23 +188,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_wdid.set_defaults(func=cmd_write_did)
 
     # routine
-    p_rc = sub.add_parser("routine", help="Execute a RoutineControl (0x31 01)")
+    p_rc = sub.add_parser(
+        "routine", help="Execute a RoutineControl (0x31 01)")
     p_rc.add_argument("routine_id", help="Routine ID in hex (e.g. 0xFF00)")
-    p_rc.add_argument("arg", nargs="?", default="", help="Optional argument hex bytes")
+    p_rc.add_argument(
+        "arg", nargs="?", default="", help="Optional argument hex bytes")
     p_rc.set_defaults(func=cmd_routine)
 
     # security-access
-    p_sa = sub.add_parser("security-access", help="Enter programming session + full seed/key exchange")
+    p_sa = sub.add_parser(
+        "security-access",
+        help="Enter programming session + full seed/key exchange")
     p_sa.set_defaults(func=cmd_security_access)
 
     # session
     p_sess = sub.add_parser("session", help="Switch diagnostic session")
-    p_sess.add_argument("mode", help="Session: default|programming|extended|safety or 0xNN")
+    p_sess.add_argument(
+        "mode",
+        help="Session: default|programming|extended|safety or 0xNN")
     p_sess.set_defaults(func=cmd_session)
 
     # reset
     p_rst = sub.add_parser("reset", help="ECU hard reset (0x11 01)")
     p_rst.set_defaults(func=cmd_reset)
+
+    # clear-dtc
+    p_cdtc = sub.add_parser(
+        "clear-dtc",
+        help="ClearDiagnosticInformation (0x14) — group 0xFFFFFF")
+    p_cdtc.set_defaults(func=cmd_clear_dtc)
 
     return parser
 
