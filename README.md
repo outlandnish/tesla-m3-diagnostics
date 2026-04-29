@@ -91,7 +91,7 @@ python uds_tool.py --node PCS --channel vcan0 reset
 
 ### `flash_tool.py` — Firmware flash CLI
 
-Flashes firmware to an ECU using the Tesla 10-step UDS programming sequence: identity discovery → firmware selection → pre-flight verification → flash.
+Flashes firmware to an ECU using the correct ECU-specific UDS programming sequence: identity discovery → firmware selection → pre-flight verification → flash. The flash sequence is selected automatically from `flash_scripts.py` based on the ECU type reported in `signed_metadata_map.tsv`, covering all 21 script variants reverse-engineered from `hashpicker_sim`.
 
 ```
 python flash_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
