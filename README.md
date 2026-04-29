@@ -1,4 +1,4 @@
-# uds_tools
+# tesla_uds_tools
 
 UDS diagnostic and firmware flashing tools for Tesla Model 3 ECUs over CAN.
 
@@ -21,23 +21,23 @@ python uds_tool.py --node PCS --channel vcan0 reset
 
 **Subcommands**
 
-| Command | Description |
-|---|---|
-| `scan` | Probe all nodes for a TesterPresent response |
-| `read-did <did>` | Read a DID by name or hex ID (UDS 0x22) |
-| `write-did <did> <hex>` | Write a DID (UDS 0x2E) |
-| `routine <id> [arg]` | Execute a RoutineControl (UDS 0x31) |
-| `security-access` | Enter programming session and complete seed/key exchange |
-| `session <mode>` | Switch diagnostic session (`default`, `programming`, `extended`, `safety`, or `0xNN`) |
-| `reset` | Send ECU hard reset (UDS 0x11 01) |
+| Command                 | Description                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| `scan`                  | Probe all nodes for a TesterPresent response                                          |
+| `read-did <did>`        | Read a DID by name or hex ID (UDS 0x22)                                               |
+| `write-did <did> <hex>` | Write a DID (UDS 0x2E)                                                                |
+| `routine <id> [arg]`    | Execute a RoutineControl (UDS 0x31)                                                   |
+| `security-access`       | Enter programming session and complete seed/key exchange                              |
+| `session <mode>`        | Switch diagnostic session (`default`, `programming`, `extended`, `safety`, or `0xNN`) |
+| `reset`                 | Send ECU hard reset (UDS 0x11 01)                                                     |
 
 **Options**
 
-| Flag | Default | Description |
-|---|---|---|
-| `--node`, `-n` | — | ECU node name (e.g. `PCS`, `CP`, `RCM`) |
-| `--channel`, `-c` | `vcan0` | CAN interface |
-| `--interface`, `-i` | `socketcan` | python-can interface type |
+| Flag                | Default     | Description                             |
+| ------------------- | ----------- | --------------------------------------- |
+| `--node`, `-n`      | —           | ECU node name (e.g. `PCS`, `CP`, `RCM`) |
+| `--channel`, `-c`   | `vcan0`     | CAN interface                           |
+| `--interface`, `-i` | `socketcan` | python-can interface type               |
 
 ---
 
@@ -52,13 +52,13 @@ python flash_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2 
 
 **Options**
 
-| Flag | Default | Description |
-|---|---|---|
-| `--node`, `-n` | — | ECU node name |
-| `--channel`, `-c` | `vcan0` | CAN interface |
-| `--interface`, `-i` | `socketcan` | python-can interface type |
-| `--artifacts`, `-a` | — | Path to `seed_artifacts_v2` directory |
-| `--force` | — | Proceed despite BHX identity mismatches |
+| Flag                | Default     | Description                             |
+| ------------------- | ----------- | --------------------------------------- |
+| `--node`, `-n`      | —           | ECU node name                           |
+| `--channel`, `-c`   | `vcan0`     | CAN interface                           |
+| `--interface`, `-i` | `socketcan` | python-can interface type               |
+| `--artifacts`, `-a` | —           | Path to `seed_artifacts_v2` directory   |
+| `--force`           | —           | Proceed despite BHX identity mismatches |
 
 The tool reads `signed_metadata_map.tsv` from the artifacts directory to select the correct firmware file for the connected ECU's identity (PCBA_ID / ASSEMBLY_ID / USAGE_ID).
 
