@@ -188,6 +188,10 @@ def step_check_rev(sess: "UdsSession", ctx: FlashContext) -> None:
     sess.routine_control(_RC_CHECK_REV)
 
 
+def step_sleep_100ms(sess: "UdsSession", ctx: FlashContext) -> None:
+    time.sleep(0.1)
+
+
 def step_sleep_300ms(sess: "UdsSession", ctx: FlashContext) -> None:
     time.sleep(0.3)
 
@@ -471,7 +475,7 @@ SCRIPT_IBSTCAL = FlashScript(
         step_transfer_loop,
         step_verify_crc,
         step_hard_reset_with_retries,
-        step_sleep_300ms,
+        step_sleep_100ms,
     ],
     security_level=3,
     erase_timeout=4.0,
@@ -490,7 +494,7 @@ SCRIPT_RCM = FlashScript(
         step_transfer_loop,
         step_verify_crc,
         step_check_rev,
-        step_sleep_300ms,
+        step_sleep_100ms,
         step_hard_reset_with_retries,
     ],
     security_level=3,
@@ -679,8 +683,8 @@ ECU_SCRIPT_MAP: dict[str, _Entry] = {
     "ibst": (SCRIPT_IBST, 0x00),
 
     # espcal / rcmcal (0x00651170)
-    "espcal": (SCRIPT_ESPCAL, 0x00),
-    "rcmcal": (SCRIPT_ESPCAL, 0x00),
+    "espcal": (SCRIPT_ESPCAL, 0x07),
+    "rcmcal": (SCRIPT_ESPCAL, 0x07),
 
     # esp (0x00651190)
     "esp": (SCRIPT_ESP, 0x00),

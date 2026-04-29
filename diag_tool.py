@@ -35,9 +35,9 @@ _NAMED_ROUTINES: dict[str, tuple[int, str, bool]] = {
     "check-component":    (0x0202, "checkCorrectComponentAndRev", False),
     "ota-wait":           (0x0540, "vcWaitForOTAMode / otaStateRoutineControl", False),
     "ibst-power":         (0x0543, "ibstPowerControl", True),
-    "ota-validate":       (0x0402, "OTA state validation (session-dependent)", False),
-    "ota-validate-noack": (0x0403, "OTA state validation (no response check)", False),
-    "routine-0601":       (0x0601, "Opcode 37 unnamed routine", False),
+    "ota-validate":            (0x0402, "bmsContactorControl (session-dependent response check)", False),
+    "ota-validate-noack":      (0x0403, "bmsContactorControl (no response check)", False),
+    "disable-intrusion-sensor": (0x0601, "disableIntrusionSensor", False),
 }
 
 # DIDs read by opcode 14 (boardPartSerialNumberGet) → modinfo fields
