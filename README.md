@@ -1,4 +1,4 @@
-# tesla_m3_uds_tools
+# tesla-m3-uds-tools
 
 UDS diagnostic and firmware flashing tools for Tesla Model 3 ECUs over CAN.
 
