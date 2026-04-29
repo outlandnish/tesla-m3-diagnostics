@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""Interactive diagnostic terminal for Tesla Model 3 ECUs.
+
+Usage:
+  python diag_tool.py --channel vcan0
+  python diag_tool.py --node PCS --channel vcan0
+  python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
+"""
+
+from __future__ import annotations
+
+import json
+import readline
+import sys
+from pathlib import Path
+from typing import Any
+
+_SCRIPT_DIR = Path(__file__).parent
+_DATA_DIR = _SCRIPT_DIR / "data"
+_NODES_JSON = _DATA_DIR / "nodes.json"
+_ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
+_ODJ_DIR = _DATA_DIR / "odj"
+
+# Well-known routine IDs from hashpicker_sim VM opcode analysis
+_NAMED_ROUTINES: dict[str, tuple[int, str]] = {
+    "erase":              (0xFF00, "EraseMemory"),
+    "check-deps":         (0xFF01, "CheckProgrammingDependencies"),
+    "verify":             (0xFF02, "CheckMemory / CRC verify"),
+    "disable-intrusion":  (0x0601, "DisableIntrusionSensor"),
+}
+
+
+# ---------------------------------------------------------------------------
+# ODJ field decode
+# ---------------------------------------------------------------------------
+
+def _decode_fields(data: bytes, fields: dict[str, Any]) -> list[tuple[str, str]]:
+    """Decode response bytes into (field_name, value_str) pairs using ODJ field specs."""
+    results = []
+    for name, spec in sorted(fields.items(), key=lambda x: x[1].get("byte_position", 0)):
+        dtype = spec.get("data_type", "bytes")
+        byte_pos = spec.get("byte_position", 0)
+        bit_len = spec.get("bit_length", 8)
+        byte_len = (bit_len + 7) // 8
+        chunk = data[byte_pos:byte_pos + byte_len]
+        if not chunk:
+            continue
+        if dtype == "ascii":
+            val = chunk.decode("ascii", errors="replace").rstrip("\x00")
+            results.append((name, repr(val)))
+        elif dtype in ("uint", "int"):
+            n = int.from_bytes(chunk, "big")
+            if dtype == "int" and chunk[0] & 0x80:
+                n -= 1 << (byte_len * 8)
+            results.append((name, f"{n}  (0x{int.from_bytes(chunk, 'big'):0{byte_len*2}X})"))
+        else:
+            results.append((name, chunk.hex()))
+    return results
+
+
+def _load_odj_fields(odj_path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(odj_path.read_text()).get("data", {})
+    except Exception:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Tab completion
+# ---------------------------------------------------------------------------
+
+class _Completer:
+    def __init__(self, options: list[str]):
+        self._options = options
+        self._matches: list[str] = []
+
+    def complete(self, text: str, state: int) -> str | None:
+        if state == 0:
+            self._matches = [o for o in self._options if o.lower().startswith(text.lower())]
+        return self._matches[state] if state < len(self._matches) else None
+
+
+def _setup_completion(options: list[str]) -> None:
+    completer = _Completer(options)
+    readline.set_completer(completer.complete)
+    readline.parse_and_bind("tab: complete")
+
+
+# ---------------------------------------------------------------------------
+# Display helpers
+# ---------------------------------------------------------------------------
+
+def _hdr(text: str) -> None:
+    print(f"\n{'─' * 60}")
+    print(f"  {text}")
+    print(f"{'─' * 60}")
+
+
+def _print_did_response(name: str, did_id: int, data: bytes, fields: dict[str, Any]) -> None:
+    print(f"\n  {name} (0x{did_id:04X})  [{len(data)} bytes]")
+    decoded = _decode_fields(data, fields)
+    if decoded:
+        for fname, val in decoded:
+            print(f"    {fname:<36} {val}")
+    else:
+        print(f"    {data.hex()}")
+
+
+# ---------------------------------------------------------------------------
+# Node selection
+# ---------------------------------------------------------------------------
+
+def _pick_node(nodes: dict) -> str:
+    names = sorted(nodes.keys())
+    _hdr("Select ECU node")
+    for i, n in enumerate(names):
+        print(f"  [{i:2d}] {n}")
+    _setup_completion(names)
+    while True:
+        raw = input("\nNode (name or index): ").strip()
+        if raw in nodes:
+            return raw
+        try:
+            idx = int(raw)
+            if 0 <= idx < len(names):
+                return names[idx]
+        except ValueError:
+            pass
+        print(f"  Unknown: {raw!r}")
+
+
+# ---------------------------------------------------------------------------
+# Identity banner (0xF180)
+# ---------------------------------------------------------------------------
+
+def _show_identity(sess, cfg) -> None:
+    from uds.client import UdsError
+    try:
+        data = sess.read_did(0xF180)
+    except UdsError as e:
+        print(f"  Could not read 0xF180: {e}")
+        return
+
+    print(f"\n  Connected to {cfg.name}")
+    print(f"  0xF180 raw: {data.hex()}")
+
+    # Load field spec from the node's ODJ
+    f180_fields: dict[str, Any] = {}
+    for odj_name in json.loads(_NODES_JSON.read_text()).get(cfg.name, {}).get("odj_sources", []):
+        odj_data = _load_odj_fields(_ODJ_DIR / odj_name)
+        for did_spec in odj_data.values():
+            if int(did_spec.get("hex_id", "0"), 16) == 0xF180:
+                f180_fields = did_spec.get("read", {}).get("output", {})
+                break
+        if f180_fields:
+            break
+
+    decoded = _decode_fields(data, f180_fields)
+    if decoded:
+        for fname, val in decoded:
+            print(f"    {fname:<36} {val}")
+
+
+# ---------------------------------------------------------------------------
+# DID menu
+# ---------------------------------------------------------------------------
+
+def _did_menu(sess, cfg, odj_fields: dict[str, Any]) -> None:
+    from uds.client import UdsError
+
+    # Build readable DID list
+    readable = {
+        name: spec for name, spec in odj_fields.items()
+        if "read" in spec
+    }
+    if not readable:
+        print("  No readable DIDs found for this node.")
+        return
+
+    names = sorted(readable.keys())
+    _setup_completion(names + ["back", "list"])
+
+    _hdr(f"DID read — {cfg.name}  ({len(readable)} readable DIDs)")
+    print("  Type a DID name (tab to complete), hex ID (0xNNNN), 'list', or 'back'")
+
+    while True:
+        try:
+            raw = input("\n  DID> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+
+        if not raw:
+            continue
+        if raw.lower() in ("back", "q", "quit"):
+            return
+        if raw.lower() == "list":
+            print()
+            for n in names:
+                spec = readable[n]
+                did_id = int(spec.get("hex_id", "0"), 16)
+                size = spec.get("read", {}).get("output_size", "?")
+                sl = spec.get("read", {}).get("security_level", 0)
+                sl_str = f"  sl={sl}" if sl else ""
+                print(f"    0x{did_id:04X}  {n:<40} {size}B{sl_str}")
+            continue
+
+        # Resolve name or hex
+        if raw in readable:
+            name = raw
+            spec = readable[name]
+        elif raw.lower().startswith("0x"):
+            try:
+                did_id = int(raw, 16)
+            except ValueError:
+                print(f"  Invalid hex: {raw!r}")
+                continue
+            match = next((n for n, s in readable.items() if int(s.get("hex_id", "0"), 16) == did_id), None)
+            if match:
+                name, spec = match, readable[match]
+            else:
+                print(f"  DID 0x{did_id:04X} not in ODJ — attempting raw read")
+                name, spec = raw, {}
+        else:
+            print(f"  Unknown DID: {raw!r}  (try 'list' or tab complete)")
+            continue
+
+        did_id = int(spec.get("hex_id", "0"), 16) if spec else int(raw, 16)
+        sl = spec.get("read", {}).get("security_level", 0) if spec else 0
+
+        if sl:
+            print(f"  DID requires security level {sl} — running security access...")
+            try:
+                sess.diagnostic_session(0x02)
+                sess.security_access()
+            except UdsError as e:
+                print(f"  Security access failed: {e}")
+                continue
+
+        try:
+            data = sess.read_did(did_id)
+            fields = spec.get("read", {}).get("output", {}) if spec else {}
+            _print_did_response(name, did_id, data, fields)
+        except UdsError as e:
+            print(f"  Error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Routine menu
+# ---------------------------------------------------------------------------
+
+def _routine_menu(sess, cfg) -> None:
+    from uds.client import UdsError
+
+    named = list(_NAMED_ROUTINES.keys())
+    _setup_completion(named + ["back", "list"])
+
+    _hdr(f"Routine control — {cfg.name}")
+    print("  Type a routine name, hex ID (0xNNNN), or 'back'")
+    print("  Named routines: " + ", ".join(named))
+
+    while True:
+        try:
+            raw = input("\n  Routine> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+
+        if not raw:
+            continue
+        if raw.lower() in ("back", "q", "quit"):
+            return
+        if raw.lower() == "list":
+            print()
+            for name, (rid, desc) in _NAMED_ROUTINES.items():
+                print(f"    0x{rid:04X}  {name:<24} {desc}")
+            continue
+
+        if raw.lower() in _NAMED_ROUTINES:
+            routine_id, desc = _NAMED_ROUTINES[raw.lower()]
+            print(f"  → 0x{routine_id:04X}  {desc}")
+        elif raw.lower().startswith("0x"):
+            try:
+                routine_id = int(raw, 16)
+                desc = ""
+            except ValueError:
+                print(f"  Invalid hex: {raw!r}")
+                continue
+        else:
+            print(f"  Unknown routine: {raw!r}")
+            continue
+
+        arg_raw = input("  Arg bytes (hex, empty for none): ").strip()
+        try:
+            arg = bytes.fromhex(arg_raw.replace(" ", "")) if arg_raw else b""
+        except ValueError:
+            print(f"  Invalid hex: {arg_raw!r}")
+            continue
+
+        try:
+            result = sess.routine_control(routine_id, arg)
+            print(f"  Result: {result.hex() if result else '(empty)'}")
+        except UdsError as e:
+            print(f"  Error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# DFU (firmware update via flash_tool phases)
+# ---------------------------------------------------------------------------
+
+def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
+    from uds.client import UdsError
+
+    _hdr(f"Firmware update (DFU) — {cfg.name}")
+
+    if artifacts_dir is None:
+        artifacts_dir_str = input("  Path to seed_artifacts_v2: ").strip()
+        artifacts_dir = Path(artifacts_dir_str).expanduser().resolve()
+
+    if not artifacts_dir.is_dir():
+        print(f"  Artifacts directory not found: {artifacts_dir}")
+        return
+
+    force_raw = input("  Skip identity mismatch check? [y/N] ").strip().lower()
+    force = force_raw == "y"
+
+    try:
+        from flash_tool import phase1_identity, phase2_firmware_selection, phase3_preflight, phase4_flash
+
+        _hdr("Phase 1: Identity")
+        identity = phase1_identity(sess, cfg.name)
+
+        _hdr("Phase 2: Firmware selection")
+        selected = phase2_firmware_selection(artifacts_dir, identity, cfg.name)
+
+        _hdr("Phase 3: Pre-flight verification")
+        phase3_preflight(artifacts_dir, selected, identity, force)
+
+        confirm = input("\n  Proceed with flashing? [y/N] ").strip().lower()
+        if confirm != "y":
+            print("  Aborted.")
+            return
+
+        _hdr("Phase 4: Flashing")
+        phase4_flash(sess, artifacts_dir, selected)
+
+    except SystemExit:
+        print("  DFU aborted.")
+    except UdsError as e:
+        print(f"  UDS error: {e}")
+    except Exception as e:
+        print(f"  Error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Main menu
+# ---------------------------------------------------------------------------
+
+def _main_menu(sess, cfg, odj_fields: dict[str, Any], artifacts_dir: Path | None) -> None:
+    _setup_completion(["dids", "routine", "dfu", "session", "reset", "quit"])
+
+    while True:
+        _hdr(f"{cfg.name}  —  Main menu")
+        print("  dids      Read DIDs interactively")
+        print("  routine   Run a routine control")
+        print("  dfu       Firmware update")
+        print("  session   Switch diagnostic session")
+        print("  reset     ECU hard reset")
+        print("  quit      Disconnect and exit")
+
+        try:
+            cmd = input("\n  > ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if cmd in ("q", "quit", "exit"):
+            break
+        elif cmd == "dids":
+            _did_menu(sess, cfg, odj_fields)
+        elif cmd == "routine":
+            _routine_menu(sess, cfg)
+        elif cmd == "dfu":
+            _dfu_menu(sess, cfg, artifacts_dir)
+        elif cmd == "session":
+            _session_cmd(sess)
+        elif cmd == "reset":
+            _reset_cmd(sess)
+        elif cmd:
+            print(f"  Unknown command: {cmd!r}")
+
+
+def _session_cmd(sess) -> None:
+    from uds.client import UdsError
+    mode_map = {"default": 0x01, "programming": 0x02, "extended": 0x03, "safety": 0x04}
+    raw = input("  Session (default/programming/extended/safety or 0xNN): ").strip().lower()
+    mode = mode_map.get(raw)
+    if mode is None:
+        try:
+            mode = int(raw, 0)
+        except ValueError:
+            print(f"  Unknown session: {raw!r}")
+            return
+    try:
+        sess.diagnostic_session(mode)
+        print(f"  Entered session 0x{mode:02X}")
+    except UdsError as e:
+        print(f"  Error: {e}")
+
+
+def _reset_cmd(sess) -> None:
+    from uds.client import UdsError
+    confirm = input("  Send ECU hard reset? [y/N] ").strip().lower()
+    if confirm != "y":
+        return
+    try:
+        sess.ecu_reset(0x01)
+        print("  Reset sent.")
+    except UdsError as e:
+        print(f"  Error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    import argparse
+    from uds.node_config import load_node_config
+    from uds.client import UdsSession
+
+    parser = argparse.ArgumentParser(description="Interactive Tesla Model 3 ECU diagnostic terminal")
+    parser.add_argument("--node", "-n", help="ECU node name (e.g. PCS, CP). Prompts if omitted.")
+    parser.add_argument("--channel", "-c", default="vcan0", help="CAN interface (default: vcan0)")
+    parser.add_argument("--interface", "-i", default="socketcan", help="python-can interface type")
+    parser.add_argument("--artifacts", "-a", help="Path to seed_artifacts_v2 (for DFU)")
+    args = parser.parse_args()
+
+    nodes = json.loads(_NODES_JSON.read_text())
+
+    node_name = args.node
+    if not node_name:
+        node_name = _pick_node(nodes)
+
+    node_name = node_name.upper()
+    if node_name not in nodes:
+        print(f"Error: unknown node {node_name!r}")
+        return 1
+
+    artifacts_dir = Path(args.artifacts).expanduser().resolve() if args.artifacts else None
+
+    try:
+        cfg = load_node_config(node_name, _NODES_JSON, _ETH_COMPACT, _ODJ_DIR)
+    except Exception as e:
+        print(f"Error loading node config: {e}")
+        return 1
+
+    # Merge all ODJ field specs for this node
+    odj_fields: dict[str, Any] = {}
+    for odj_name in nodes[node_name].get("odj_sources", []):
+        odj_fields.update(_load_odj_fields(_ODJ_DIR / odj_name))
+
+    print(f"\nConnecting to {node_name} on {args.channel}...")
+
+    try:
+        with UdsSession(cfg, args.channel, interface=args.interface) as sess:
+            _show_identity(sess, cfg)
+            _main_menu(sess, cfg, odj_fields, artifacts_dir)
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        print(f"\nError: {e}")
+        return 1
+
+    print("\nDisconnected.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

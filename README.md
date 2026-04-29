@@ -4,6 +4,38 @@ UDS diagnostic and firmware flashing tools for Tesla Model 3 ECUs over CAN.
 
 ## Tools
 
+### `diag_tool.py` — Interactive diagnostic terminal
+
+Interactive terminal for exploring ECU state. Connects to a node, reads identity on startup, then lets you read DIDs by name (with tab completion), run routines by name or hex ID, switch sessions, and trigger a firmware update — all in one session.
+
+```
+python diag_tool.py --channel vcan0                          # picks node interactively
+python diag_tool.py --node PCS --channel vcan0
+python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
+```
+
+**Options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--node`, `-n` | — | ECU node name. Prompted interactively if omitted. |
+| `--channel`, `-c` | `vcan0` | CAN interface |
+| `--interface`, `-i` | `socketcan` | python-can interface type |
+| `--artifacts`, `-a` | — | Path to `seed_artifacts_v2` (needed for DFU; prompted if missing) |
+
+**Commands**
+
+| Command | Description |
+|---|---|
+| `dids` | Read DIDs by name (tab complete) or hex ID; auto-decodes fields from ODJ |
+| `routine` | Run a routine by name (`erase`, `verify`, `check-deps`, `disable-intrusion`) or hex ID |
+| `dfu` | Full firmware update using `flash_tool` phases (identity → select → preflight → flash) |
+| `session` | Switch diagnostic session |
+| `reset` | ECU hard reset |
+| `quit` | Disconnect and exit |
+
+---
+
 ### `uds_tool.py` — UDS diagnostic CLI
 
 General-purpose UDS client for reading/writing DIDs, running routines, managing sessions, and scanning the network.
