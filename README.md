@@ -1,6 +1,6 @@
-# tesla-m3-uds-tools
+# tesla-m3-diagnostics
 
-UDS diagnostic and firmware flashing tools for Tesla Model 3 ECUs over CAN.
+Tesla Model 3 diagnostics tools for CAN
 
 ## Tools
 
@@ -16,23 +16,38 @@ python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 
 **Options**
 
-| Flag | Default | Description |
-|---|---|---|
-| `--node`, `-n` | — | ECU node name. Prompted interactively if omitted. |
-| `--channel`, `-c` | `vcan0` | CAN interface |
-| `--interface`, `-i` | `socketcan` | python-can interface type |
-| `--artifacts`, `-a` | — | Path to `seed_artifacts_v2` (needed for DFU; prompted if missing) |
+| Flag                | Default     | Description                                                       |
+| ------------------- | ----------- | ----------------------------------------------------------------- |
+| `--node`, `-n`      | —           | ECU node name. Prompted interactively if omitted.                 |
+| `--channel`, `-c`   | `vcan0`     | CAN interface                                                     |
+| `--interface`, `-i` | `socketcan` | python-can interface type                                         |
+| `--artifacts`, `-a` | —           | Path to `seed_artifacts_v2` (needed for DFU; prompted if missing) |
 
 **Commands**
 
-| Command | Description |
-|---|---|
-| `dids` | Read DIDs by name (tab complete) or hex ID; auto-decodes fields from ODJ |
-| `routine` | Run a routine by name (`erase`, `verify`, `check-deps`, `disable-intrusion`) or hex ID |
-| `dfu` | Full firmware update using `flash_tool` phases (identity → select → preflight → flash) |
-| `session` | Switch diagnostic session |
-| `reset` | ECU hard reset |
-| `quit` | Disconnect and exit |
+| Command       | Description                                                                            |
+| ------------- | -------------------------------------------------------------------------------------- |
+| `dids`        | Read DIDs by name (tab complete) or hex ID; auto-decodes fields from ODJ               |
+| `routine`     | Run a routine by name or hex ID (see named routines below)                             |
+| `board-parts` | Read board part/serial DIDs `0xF012`–`0xF015`, `0xF030`/`0xF031` (opcode 14)           |
+| `clear-dtc`   | ClearDiagnosticInformation group `0xFFFFFF` (UDS 0x14)                                 |
+| `dfu`         | Full firmware update using `flash_tool` phases (identity → select → preflight → flash) |
+| `session`     | Switch diagnostic session                                                              |
+| `reset`       | ECU hard reset                                                                         |
+| `quit`        | Disconnect and exit                                                                    |
+
+**Named routines** (from hashpicker_sim VM opcode table)
+
+| Name                 | Routine ID | Description                                                      |
+| -------------------- | ---------- | ---------------------------------------------------------------- |
+| `erase`              | `0xFF00`   | `initializeEraseModule` — EraseMemory (requires security access) |
+| `verify-crc`         | `0x0201`   | `checkModuleProgrammedCorrectly` — CRC verify                    |
+| `check-component`    | `0x0202`   | `checkCorrectComponentAndRev`                                    |
+| `ota-wait`           | `0x0540`   | `vcWaitForOTAMode` / `otaStateRoutineControl`                    |
+| `ibst-power`         | `0x0543`   | `ibstPowerControl` (requires security access)                    |
+| `ota-validate`       | `0x0402`   | OTA state validation (session-dependent response check)          |
+| `ota-validate-noack` | `0x0403`   | OTA state validation (no response check)                         |
+| `routine-0601`       | `0x0601`   | Opcode 37 unnamed routine                                        |
 
 ---
 
@@ -62,6 +77,7 @@ python uds_tool.py --node PCS --channel vcan0 reset
 | `security-access`       | Enter programming session and complete seed/key exchange                              |
 | `session <mode>`        | Switch diagnostic session (`default`, `programming`, `extended`, `safety`, or `0xNN`) |
 | `reset`                 | Send ECU hard reset (UDS 0x11 01)                                                     |
+| `clear-dtc`             | ClearDiagnosticInformation group `0xFFFFFF` (UDS 0x14)                                |
 
 **Options**
 
@@ -121,6 +137,42 @@ bhx_file = bhx.from_binary_segments([(0x88000, data)])
 bhx.build_file(bhx_file, "out.bhx")
 ```
 
+---
+
+### `can_live.py` — Live CAN signal viewer
+
+Web-based live viewer that decodes CAN frames in real time using `Model3_ETH.compact.json`. Select an ECU node from the sidebar to see all its signals updating live, with age indicators and enum labels.
+
+```
+python can_live.py --channel vcan0
+python can_live.py --channel vcan0 --interface socketcan --port 8765
+```
+
+Opens `http://localhost:8765` automatically in your browser.
+
+**Options**
+
+| Flag              | Default     | Description                          |
+| ----------------- | ----------- | ------------------------------------ |
+| `--channel`       | `vcan0`     | CAN interface                        |
+| `--interface`     | `socketcan` | python-can interface type            |
+| `--bitrate`       | —           | CAN bitrate (optional)               |
+| `--port`          | `8765`      | HTTP/WebSocket port                  |
+| `--no-browser`    | —           | Don't auto-open browser on start     |
+
+**Features**
+
+- Node sidebar — all 39 ECU nodes listed; click to subscribe
+- Live signal table — per-message sections with signal name, value, unit, and enum label
+- Value flash — cells briefly highlight when a value changes
+- Age indicator — shows time since last frame per message; turns red when stale (>1 s)
+- Signal filter — type to narrow signals by name
+- FPS counter — shows decoded frames/second in the top bar
+
+**Signal decoding** handles little-endian and big-endian bit packing, multiplexed signals (`mux_id`), `value_description` enum mappings, and signed/unsigned scale+offset.
+
+---
+
 ## Data files
 
 Node configurations live in `data/`:
@@ -135,7 +187,7 @@ Node configurations live in `data/`:
 pip install -r requirements.txt
 ```
 
-Requires Python 3.10+, `python-can`, and a SocketCAN interface (real or virtual via `vcan`).
+Requires Python 3.10+, `python-can`, `aiohttp`, and a SocketCAN interface (real or virtual via `vcan`). `can_live.py` also requires `aiohttp`.
 
 ## Tests
 
