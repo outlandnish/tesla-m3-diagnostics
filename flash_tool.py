@@ -12,6 +12,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from uds.client import UdsSession
+
 _SCRIPT_DIR = Path(__file__).parent
 _DATA_DIR = _SCRIPT_DIR / "data"
 _NODES_JSON = _DATA_DIR / "nodes.json"
@@ -39,7 +41,7 @@ def _print_section(title: str) -> None:
     print(f"{'='*60}")
 
 
-def phase1_identity(sess, node_name: str) -> dict:
+def phase1_identity(sess: UdsSession, node_name: str) -> dict:
     """Read ECU identity via DID 0xF180. Returns a dict of parsed fields."""
     _print_section("Phase 1: Identity Discovery")
 
@@ -192,7 +194,7 @@ def phase3_preflight(artifacts_dir: Path, selected: list, identity: dict, force:
             print(f"  {entry.src_path}: no identity header found, skipping pre-flight check")
 
 
-def phase4_flash(sess, artifacts_dir: Path, selected: list) -> None:
+def phase4_flash(sess: UdsSession, artifacts_dir: Path, selected: list) -> None:
     """Execute the 10-step UDS flash sequence for each firmware file."""
     import bhx
 
@@ -282,7 +284,6 @@ def main() -> int:
         return 1
 
     from uds.node_config import load_node_config
-    from uds.client import UdsSession
 
     cfg = load_node_config(args.node, _NODES_JSON, _ETH_COMPACT, _ODJ_DIR)
 
