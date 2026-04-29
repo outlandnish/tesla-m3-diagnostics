@@ -11,7 +11,6 @@ from uds.addressing import AddressingType
 from uds.can.addressing import NormalCanAddressingInformation
 from uds.can.transport_interface import PyCanTransportInterface
 from uds.message import UdsMessage
-from uds.transport_interface import AbstractTransportInterface
 
 from .node_config import NodeConfig
 from .security import compute_key
@@ -71,13 +70,15 @@ class UdsSession:
         channel: str,
         interface: str = "socketcan",
     ):
-        bus = can.Bus(interface=interface, channel=channel)
+        self._bus = can.Bus(interface=interface, channel=channel)
         addressing = NormalCanAddressingInformation(
-            rx_physical={"can_id": node.response_can_id},
-            tx_physical={"can_id": node.request_can_id},
+            rx_physical_params={"can_id": node.response_can_id},
+            tx_physical_params={"can_id": node.request_can_id},
+            rx_functional_params={"can_id": 0x7E8},
+            tx_functional_params={"can_id": 0x7DF},
         )
-        self._transport: AbstractTransportInterface = PyCanTransportInterface(
-            network_manager=bus,
+        self._transport: PyCanTransportInterface = PyCanTransportInterface(
+            network_manager=self._bus,
             addressing_information=addressing,
         )
         self._node = node
@@ -171,14 +172,14 @@ class UdsSession:
         self.write_did(_DID_MODULE_TO_PROGRAM, bytes([module_byte]))
 
     def set_timeout(self, p2_seconds: float) -> None:
-        """Update the transport P2/P2* timeouts (seconds).
+        """Update the transport timeouts (seconds → milliseconds).
 
-        Mirrors netSetTimeout: P2* = P2 × 2.
+        Sets both N_Bs (inter-frame) and N_Cr (consecutive frame) timeouts.
         Call before long operations (erase, large transfers) and restore after.
         """
-        p2_ms = int(p2_seconds * 1000)
-        p2star_ms = p2_ms * 2
-        self._transport.set_timeouts(p2_ms / 1000, p2star_ms / 1000)
+        p2_ms = p2_seconds * 1000
+        self._transport.n_bs_timeout = p2_ms
+        self._transport.n_cr_timeout = p2_ms
 
     def check_flash_count(self, limit: int) -> None:
         """Read DID 0xF100 and raise FlashCountError if count >= limit."""
@@ -276,10 +277,12 @@ class UdsSession:
             payload=bytearray(payload),
             addressing_type=AddressingType.PHYSICAL,
         )
-        _, responses = self._transport.send_message(msg)
-        if not responses:
+        self._transport.send_message(msg)
+        try:
+            record = self._transport.receive_message(start_timeout=1000, end_timeout=1000)
+            return list(record.payload)
+        except Exception:
             return []
-        return list(responses[0].payload)
 
     @staticmethod
     def _check_positive(resp: list[int], expected_sid: int) -> None:
@@ -299,6 +302,6 @@ class UdsSession:
     def __exit__(self, *_: Any) -> None:
         self.stop_tester_present()
         try:
-            self._transport.disconnect()
+            self._bus.shutdown()
         except Exception:
             pass
