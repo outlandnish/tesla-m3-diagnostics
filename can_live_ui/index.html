@@ -26,12 +26,50 @@
     font-family: 'SF Mono', 'Cascadia Code', 'Fira Mono', monospace;
     font-size: 13px;
     display: flex;
+    flex-direction: column;
     height: 100vh;
     overflow: hidden;
   }
 
-  /* ---- sidebar ---- */
-  #sidebar {
+  /* ---- tab bar ---- */
+  #tab-bar {
+    display: flex;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .tab-btn {
+    padding: 10px 20px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    transition: color .1s, border-color .1s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* ---- shared layout ---- */
+  .tab-view {
+    display: none;
+    flex: 1;
+    overflow: hidden;
+  }
+  .tab-view.active {
+    display: flex;
+  }
+
+  /* ---- sidebar (shared) ---- */
+  .sidebar {
     width: 200px;
     min-width: 160px;
     background: var(--panel);
@@ -41,7 +79,7 @@
     overflow: hidden;
   }
 
-  #sidebar-header {
+  .sidebar-header {
     padding: 14px 12px 10px;
     border-bottom: 1px solid var(--border);
     font-size: 11px;
@@ -50,7 +88,7 @@
     color: var(--text-dim);
   }
 
-  #sidebar-header span {
+  .sidebar-header span {
     display: block;
     font-size: 15px;
     font-weight: 700;
@@ -60,7 +98,7 @@
     margin-bottom: 2px;
   }
 
-  #node-list {
+  .node-list {
     overflow-y: auto;
     flex: 1;
     padding: 6px 0;
@@ -88,22 +126,23 @@
   }
 
   /* ---- main area ---- */
-  #main {
+  .main {
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
 
-  #topbar {
+  .topbar {
     padding: 12px 18px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-shrink: 0;
   }
 
-  #node-title {
+  .node-title {
     font-size: 16px;
     font-weight: 700;
     flex: 1;
@@ -120,7 +159,7 @@
 
   #status-text { color: var(--text-dim); font-size: 12px; }
 
-  #filter-input {
+  .filter-input {
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -129,7 +168,7 @@
     font: inherit;
     width: 180px;
   }
-  #filter-input:focus { outline: none; border-color: var(--accent-dim); }
+  .filter-input:focus { outline: none; border-color: var(--accent-dim); }
 
   #fps-counter {
     color: var(--text-dim);
@@ -138,16 +177,14 @@
     text-align: right;
   }
 
-  /* ---- signal table ---- */
-  #table-wrap {
+  /* ---- signal table (live) ---- */
+  .table-wrap {
     flex: 1;
     overflow-y: auto;
     padding: 0 18px 18px;
   }
 
-  .msg-section {
-    margin-top: 16px;
-  }
+  .msg-section { margin-top: 16px; }
 
   .msg-header {
     display: flex;
@@ -173,10 +210,7 @@
   }
   .msg-age.stale { color: var(--accent); }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
-  }
+  table { width: 100%; border-collapse: collapse; }
 
   td {
     padding: 3px 6px;
@@ -185,16 +219,12 @@
   }
 
   .sig-name  { color: var(--text-dim); width: 55%; }
-  .sig-value {
-    font-weight: 600;
-    font-size: 13px;
-    transition: background .05s;
-  }
+  .sig-value { font-weight: 600; font-size: 13px; transition: background .05s; }
   .sig-value.flash { background: var(--flash); }
   .sig-units { color: var(--text-dim); font-size: 11px; padding-left: 4px; }
   .sig-label { color: var(--yellow); font-size: 11px; padding-left: 4px; }
 
-  #placeholder {
+  .placeholder {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -203,7 +233,73 @@
     gap: 10px;
     color: var(--text-dim);
   }
-  #placeholder .big { font-size: 38px; }
+  .placeholder .big { font-size: 38px; }
+
+  /* ---- explorer tab ---- */
+  #exp-search-bar {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  #exp-search {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+  }
+  #exp-search:focus { outline: none; border-color: var(--accent-dim); }
+
+  #exp-count {
+    color: var(--text-dim);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  #exp-results {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 18px 18px;
+  }
+
+  .exp-msg-section { margin-top: 16px; }
+
+  .exp-msg-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 5px 0 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 1;
+  }
+
+  .exp-node-tag {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--text-dim);
+    background: rgba(255,255,255,.05);
+    border-radius: 3px;
+    padding: 1px 5px;
+  }
+
+  .exp-sig-row { display: flex; gap: 8px; padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,.03); }
+  .exp-sig-row.hidden { display: none; }
+  .exp-sig-name { flex: 1; color: var(--text-dim); }
+  .exp-sig-units { color: var(--text-dim); font-size: 11px; min-width: 40px; }
+  .exp-sig-values { color: var(--yellow); font-size: 11px; }
+
+  .exp-node-sidebar .node-btn { font-size: 12px; }
 
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -212,45 +308,88 @@
 </head>
 <body>
 
-<div id="sidebar">
-  <div id="sidebar-header">
-    <span>Model 3 CAN</span>
-    ECU nodes
-  </div>
-  <div id="node-list"><div style="padding:12px;color:var(--text-dim)">Connecting…</div></div>
+<!-- Tab bar -->
+<div id="tab-bar">
+  <button class="tab-btn active" data-tab="live">Live</button>
+  <button class="tab-btn" data-tab="explorer">DB Explorer</button>
 </div>
 
-<div id="main">
-  <div id="topbar">
-    <div id="node-title">Select a node</div>
-    <input id="filter-input" type="text" placeholder="Filter signals…" style="display:none">
-    <div id="fps-counter"></div>
-    <div id="status-dot"></div>
-    <div id="status-text">disconnected</div>
+<!-- ===================== LIVE TAB ===================== -->
+<div id="tab-live" class="tab-view active">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Model 3 CAN</span>
+      ECU nodes
+    </div>
+    <div id="node-list" class="node-list"><div style="padding:12px;color:var(--text-dim)">Connecting…</div></div>
   </div>
-  <div id="table-wrap">
-    <div id="placeholder">
-      <div class="big">⚡</div>
-      <div>Choose an ECU node from the sidebar</div>
+
+  <div class="main">
+    <div class="topbar">
+      <div id="node-title" class="node-title">Select a node</div>
+      <input id="filter-input" class="filter-input" type="text" placeholder="Filter signals…" style="display:none">
+      <div id="fps-counter"></div>
+      <div id="status-dot"></div>
+      <div id="status-text">disconnected</div>
+    </div>
+    <div id="table-wrap" class="table-wrap">
+      <div id="placeholder" class="placeholder">
+        <div class="big">⚡</div>
+        <div>Choose an ECU node from the sidebar</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== EXPLORER TAB ===================== -->
+<div id="tab-explorer" class="tab-view">
+  <div class="sidebar exp-node-sidebar">
+    <div class="sidebar-header">
+      <span>Explorer</span>
+      ECU nodes
+    </div>
+    <div id="exp-node-list" class="node-list"><div style="padding:12px;color:var(--text-dim)">Loading…</div></div>
+  </div>
+
+  <div class="main">
+    <div id="exp-search-bar">
+      <input id="exp-search" type="text" placeholder="Search signals, messages…">
+      <div id="exp-count"></div>
+    </div>
+    <div id="exp-results">
+      <div class="placeholder">
+        <div class="big">🔍</div>
+        <div>Select a node or search to browse signals</div>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
+// ===========================================================
+// Tab switching
+// ===========================================================
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.tab-view').forEach(v => v.classList.toggle('active', v.id === `tab-${tab}`));
+    if (tab === 'explorer' && !expLoaded) loadExplorer();
+  });
+});
+
+// ===========================================================
+// LIVE TAB
+// ===========================================================
 const WS_URL = `ws://${location.host}/ws`;
 
-// ---- state ----
 let ws = null;
 let activeNode = null;
-// msgId -> { name, lastTs, signals: { signalName -> { value, label, units } } }
 const msgState = new Map();
-// msgId -> { section, ageEl, rows: { signalName -> { valueTd, labelTd } } }
-const msgDom = new Map();
-
+const msgDom   = new Map();
 let frameCount = 0;
-let lastFpsTs = performance.now();
+let lastFpsTs  = performance.now();
 
-// ---- DOM refs ----
 const nodeList    = document.getElementById('node-list');
 const nodeTitle   = document.getElementById('node-title');
 const tableWrap   = document.getElementById('table-wrap');
@@ -260,27 +399,22 @@ const statusDot   = document.getElementById('status-dot');
 const statusText  = document.getElementById('status-text');
 const fpsCounter  = document.getElementById('fps-counter');
 
-// ---- WebSocket ----
 function connect() {
   ws = new WebSocket(WS_URL);
-
   ws.onopen = () => {
     statusDot.className = 'connected';
     statusText.textContent = 'connected';
     if (activeNode) subscribe(activeNode);
   };
-
   ws.onclose = () => {
     statusDot.className = '';
     statusText.textContent = 'reconnecting…';
     setTimeout(connect, 1500);
   };
-
   ws.onerror = () => {
     statusDot.className = 'error';
     statusText.textContent = 'error';
   };
-
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if      (msg.type === 'db')     handleDb(msg);
@@ -289,7 +423,6 @@ function connect() {
   };
 }
 
-// ---- handlers ----
 function handleDb(msg) {
   nodeList.innerHTML = '';
   msg.nodes.forEach(node => {
@@ -307,7 +440,6 @@ function handleSchema(msg) {
   tableWrap.innerHTML = '';
   placeholder.style.display = 'none';
   filterInput.style.display = '';
-
   msg.messages.forEach(m => {
     msgState.set(m.id, { name: m.name, lastTs: null, signals: {} });
     m.signals.forEach(s => {
@@ -315,7 +447,6 @@ function handleSchema(msg) {
     });
     buildMsgSection(m);
   });
-
   applyFilter();
 }
 
@@ -323,21 +454,17 @@ function handleFrame(msg) {
   frameCount++;
   const state = msgState.get(msg.msg_id);
   if (!state) return;
-
   state.lastTs = msg.timestamp;
-
   msg.signals.forEach(s => {
     const cur = state.signals[s.signal];
     if (!cur) return;
     const changed = cur.value !== s.value || cur.label !== s.label;
     cur.value = s.value;
     cur.label = s.label || null;
-
     const dom = msgDom.get(msg.msg_id);
     if (!dom) return;
     const row = dom.rows[s.signal];
     if (!row) return;
-
     const formatted = formatValue(s.value, s.units);
     if (row.valueTd.textContent !== formatted) {
       row.valueTd.textContent = formatted;
@@ -347,7 +474,6 @@ function handleFrame(msg) {
   });
 }
 
-// ---- DOM builders ----
 function buildMsgSection(m) {
   const section = document.createElement('div');
   section.className = 'msg-section';
@@ -372,26 +498,16 @@ function buildMsgSection(m) {
   section.appendChild(header);
 
   const table = document.createElement('table');
-  const rows = {};
+  const rows  = {};
 
   m.signals.forEach(s => {
     const tr = document.createElement('tr');
     tr.dataset.signal = s.signal;
 
-    const nameTd = document.createElement('td');
-    nameTd.className = 'sig-name';
-    nameTd.textContent = s.signal;
-
-    const valueTd = document.createElement('td');
-    valueTd.className = 'sig-value';
-    valueTd.textContent = '—';
-
-    const unitsTd = document.createElement('td');
-    unitsTd.className = 'sig-units';
-    unitsTd.textContent = s.units || '';
-
-    const labelTd = document.createElement('td');
-    labelTd.className = 'sig-label';
+    const nameTd  = document.createElement('td'); nameTd.className  = 'sig-name';  nameTd.textContent  = s.signal;
+    const valueTd = document.createElement('td'); valueTd.className = 'sig-value'; valueTd.textContent = '—';
+    const unitsTd = document.createElement('td'); unitsTd.className = 'sig-units'; unitsTd.textContent = s.units || '';
+    const labelTd = document.createElement('td'); labelTd.className = 'sig-label';
 
     tr.append(nameTd, valueTd, unitsTd, labelTd);
     table.appendChild(tr);
@@ -403,34 +519,30 @@ function buildMsgSection(m) {
   msgDom.set(m.id, { section, ageEl, rows });
 }
 
-// ---- age ticker ----
 setInterval(() => {
   const now = Date.now() / 1000;
   msgDom.forEach((dom, id) => {
     const state = msgState.get(id);
     if (!state || state.lastTs === null) return;
     const age = now - state.lastTs;
-    const stale = age > 1.0;
     dom.ageEl.textContent = age < 10 ? `${age.toFixed(1)}s` : `${age.toFixed(0)}s`;
-    dom.ageEl.className = 'msg-age' + (stale ? ' stale' : '');
+    dom.ageEl.className = 'msg-age' + (age > 1.0 ? ' stale' : '');
   });
 }, 250);
 
-// ---- fps counter ----
 setInterval(() => {
   const now = performance.now();
   const elapsed = (now - lastFpsTs) / 1000;
   fpsCounter.textContent = `${(frameCount / elapsed).toFixed(0)} fps`;
   frameCount = 0;
-  lastFpsTs = now;
+  lastFpsTs  = now;
 }, 1000);
 
-// ---- filter ----
 filterInput.addEventListener('input', applyFilter);
 
 function applyFilter() {
   const q = filterInput.value.trim().toLowerCase();
-  msgDom.forEach((dom, id) => {
+  msgDom.forEach((dom) => {
     let msgVisible = false;
     Object.entries(dom.rows).forEach(([sig, { tr }]) => {
       const show = !q || sig.toLowerCase().includes(q);
@@ -441,10 +553,9 @@ function applyFilter() {
   });
 }
 
-// ---- node selection ----
 function selectNode(node) {
   activeNode = node;
-  document.querySelectorAll('.node-btn').forEach(b => {
+  document.querySelectorAll('#node-list .node-btn').forEach(b => {
     b.classList.toggle('active', b.textContent === node);
   });
   nodeTitle.textContent = node.toUpperCase();
@@ -456,8 +567,7 @@ function subscribe(node) {
   ws.send(JSON.stringify({ type: 'subscribe', node }));
 }
 
-// ---- helpers ----
-function formatValue(v, units) {
+function formatValue(v) {
   if (typeof v === 'number') {
     return Number.isInteger(v) ? String(v) : v.toFixed(4).replace(/\.?0+$/, '');
   }
@@ -466,12 +576,144 @@ function formatValue(v, units) {
 
 function flashCell(td) {
   td.classList.remove('flash');
-  void td.offsetWidth; // reflow
+  void td.offsetWidth;
   td.classList.add('flash');
   setTimeout(() => td.classList.remove('flash'), 300);
 }
 
 connect();
+
+// ===========================================================
+// EXPLORER TAB
+// ===========================================================
+let expLoaded   = false;
+let expDb       = {};      // node -> [ { id, name, signals: [{name, units, values}] } ]
+let expActiveNode = null;  // null = show all
+
+const expNodeList = document.getElementById('exp-node-list');
+const expSearch   = document.getElementById('exp-search');
+const expResults  = document.getElementById('exp-results');
+const expCount    = document.getElementById('exp-count');
+
+async function loadExplorer() {
+  expLoaded = true;
+  try {
+    const res = await fetch('/api/db');
+    expDb = await res.json();
+    buildExpNodeList();
+    renderExp();
+  } catch (e) {
+    expNodeList.innerHTML = `<div style="padding:12px;color:var(--accent)">Failed to load DB</div>`;
+  }
+}
+
+function buildExpNodeList() {
+  expNodeList.innerHTML = '';
+
+  const allBtn = document.createElement('button');
+  allBtn.className = 'node-btn active';
+  allBtn.textContent = 'All nodes';
+  allBtn.addEventListener('click', () => selectExpNode(null));
+  expNodeList.appendChild(allBtn);
+
+  Object.keys(expDb).sort().forEach(node => {
+    const btn = document.createElement('button');
+    btn.className = 'node-btn';
+    btn.textContent = node;
+    btn.addEventListener('click', () => selectExpNode(node));
+    expNodeList.appendChild(btn);
+  });
+}
+
+function selectExpNode(node) {
+  expActiveNode = node;
+  document.querySelectorAll('#exp-node-list .node-btn').forEach(b => {
+    const matches = node === null ? b.textContent === 'All nodes' : b.textContent === node;
+    b.classList.toggle('active', matches);
+  });
+  renderExp();
+}
+
+expSearch.addEventListener('input', renderExp);
+
+function renderExp() {
+  const q = expSearch.value.trim().toLowerCase();
+  expResults.innerHTML = '';
+
+  const nodes = expActiveNode ? [expActiveNode] : Object.keys(expDb).sort();
+  let totalSigs = 0;
+  let visibleSigs = 0;
+
+  nodes.forEach(node => {
+    const msgs = expDb[node] || [];
+    msgs.forEach(m => {
+      const matchingSignals = m.signals.filter(s =>
+        !q ||
+        s.name.toLowerCase().includes(q) ||
+        m.name.toLowerCase().includes(q)
+      );
+
+      totalSigs += m.signals.length;
+
+      if (matchingSignals.length === 0) return;
+      visibleSigs += matchingSignals.length;
+
+      const section = document.createElement('div');
+      section.className = 'exp-msg-section';
+
+      const header = document.createElement('div');
+      header.className = 'exp-msg-header';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'msg-name';
+      nameEl.textContent = m.name;
+
+      const idEl = document.createElement('span');
+      idEl.className = 'msg-id';
+      idEl.textContent = `0x${m.id.toString(16).toUpperCase().padStart(3,'0')}`;
+
+      const nodeTag = document.createElement('span');
+      nodeTag.className = 'exp-node-tag';
+      nodeTag.textContent = node;
+
+      header.append(nameEl, idEl, nodeTag);
+      section.appendChild(header);
+
+      matchingSignals.forEach(s => {
+        const row = document.createElement('div');
+        row.className = 'exp-sig-row';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'exp-sig-name';
+        nameSpan.textContent = s.name;
+
+        const unitsSpan = document.createElement('span');
+        unitsSpan.className = 'exp-sig-units';
+        unitsSpan.textContent = s.units || '';
+
+        const valuesSpan = document.createElement('span');
+        valuesSpan.className = 'exp-sig-values';
+        if (s.values.length) {
+          valuesSpan.textContent = s.values.join(' · ');
+        }
+
+        row.append(nameSpan, unitsSpan, valuesSpan);
+        section.appendChild(row);
+      });
+
+      expResults.appendChild(section);
+    });
+  });
+
+  if (expResults.children.length === 0) {
+    expResults.innerHTML = `<div class="placeholder" style="height:100%"><div>No signals match "${expSearch.value}"</div></div>`;
+    expCount.textContent = '';
+  } else {
+    expCount.textContent = q
+      ? `${visibleSigs.toLocaleString()} / ${totalSigs.toLocaleString()} signals`
+      : `${totalSigs.toLocaleString()} signals`;
+  }
+}
 </script>
 </body>
 </html>

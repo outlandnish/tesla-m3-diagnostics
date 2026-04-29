@@ -158,6 +158,30 @@ async def _index(request: web.Request) -> web.FileResponse:
     return web.FileResponse(_STATIC_DIR / "index.html")
 
 
+async def _api_db(request: web.Request) -> web.Response:
+    """Return the full DB schema: nodes → messages → signals."""
+    payload: dict[str, list] = {}
+    for node in _DB.nodes():
+        msgs = []
+        for m in _DB.messages_for_node(node):
+            signals = [
+                {
+                    "name": sname,
+                    "units": sig.get("units", ""),
+                    "values": list(sig["value_description"].keys()) if sig.get("value_description") else [],
+                }
+                for sname, sig in m["signals"].items()
+                if not sig.get("is_muxer")
+            ]
+            msgs.append({
+                "id": m["message_id"],
+                "name": m["name"],
+                "signals": signals,
+            })
+        payload[node] = msgs
+    return web.json_response(payload)
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -168,6 +192,7 @@ def _build_app(bus: can.BusABC) -> web.Application:
     app.on_startup.append(_start_reader)
     app.on_cleanup.append(_stop_reader)
     app.router.add_get("/", _index)
+    app.router.add_get("/api/db", _api_db)
     app.router.add_get("/ws", _ws_handler)
     return app
 
