@@ -5,6 +5,10 @@ Each node merges its listed ODJ sources; ECU-specific entries override `COMMON_c
 
 `sl` = security level (0 = no auth required; 3/5/11 = SecurityAccess needed first).
 
+> **Note:** All DIDs and security levels here are derived from `nodes.json` in firmware
+> **2019.20.4.2.model3**. DID availability, byte layouts, and security requirements may differ
+> across firmware versions — treat this as a reference point, not a universal spec.
+
 ---
 
 ## Security Algorithms
