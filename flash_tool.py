@@ -25,13 +25,10 @@ _ODJ_DIR = _DATA_DIR / "odj"
 _DID_BOOTLOADER_VERSION = 0xF180
 _DID_COMP_AND_FW_TYPE = 0x0101
 
-# Flash sequence routine IDs (hashpicker_sim VM opcodes, UDS_VM_OPCODES.md)
-# opcode 9  → 0xFF00  initializeEraseModule
-# opcode 12 → 0x0202  checkCorrectComponentAndRev
-# opcode 11 → 0x0201  checkModuleProgrammedCorrectly (CRC verify)
-_ROUTINE_ERASE_FLASH = 0xFF00
-_ROUTINE_CHECK_COMP_REV = 0x0202
-_ROUTINE_VERIFY_CRC = 0x0201
+# Routine IDs used in the flash sequence (FIRMWARE_UPDATE.md steps 5-8)
+_ROUTINE_ERASE_FLASH = 0xFF00    # step 5  — initializeEraseModule
+_ROUTINE_VERIFY_CRC = 0x0201     # step 7  — checkModuleProgrammedCorrectly
+_ROUTINE_CHECK_COMP_REV = 0x0202 # step 8  — checkCorrectComponentAndRev
 
 
 def _abort(msg: str) -> None:
@@ -198,8 +195,24 @@ def phase3_preflight(artifacts_dir: Path, selected: list, identity: dict, force:
             print(f"  {entry.src_path}: no identity header found, skipping pre-flight check")
 
 
+def _inter_shdr_cycle(sess: UdsSession) -> None:
+    """Re-auth + re-erase between SHDRs for GHDR v2 ramAppPayload ECUs (step 6d)."""
+    print("    [inter-SHDR] RC 0x0201 checkModuleProgrammedCorrectly")
+    sess.routine_control(_ROUTINE_VERIFY_CRC)
+    print("    [inter-SHDR] RC 0x0202 checkCorrectComponentAndRev")
+    sess.routine_control(_ROUTINE_CHECK_COMP_REV)
+    print("    [inter-SHDR] DiagnosticSessionControl(PROGRAMMING)")
+    sess.diagnostic_session(0x02)
+    print("    [inter-SHDR] SecurityAccess")
+    sess.security_access()
+    print("    [inter-SHDR] moduleToProgram DiagnosticSessionControl(PROGRAMMING)")
+    sess.diagnostic_session(0x02)
+    print("    [inter-SHDR] RC 0xFF00 initializeEraseModule")
+    sess.routine_control(_ROUTINE_ERASE_FLASH, b"\x01")
+
+
 def phase4_flash(sess: UdsSession, artifacts_dir: Path, selected: list) -> None:
-    """Execute the 10-step UDS flash sequence for each firmware file."""
+    """Execute the UDS flash sequence (steps 0-9) for each firmware file."""
     import bhx
 
     for fw_index, entry in enumerate(selected):
@@ -207,69 +220,94 @@ def phase4_flash(sess: UdsSession, artifacts_dir: Path, selected: list) -> None:
 
         src = artifacts_dir / entry.src_path
         bhx_file = bhx.parse_file(src)
+        needs_inter_shdr = (
+            bhx_file.ghdr_version == 2 and bhx_file.ram_app_payload == 1
+        )
 
-        print("  Starting TesterPresent thread...")
+        # Step 0: Soft reset — fire and forget, ECU reboots into bootloader
+        print("  Step 0: ECUReset (soft, no response wait)")
+        sess.ecu_reset_no_wait(0x01)
+
+        # Step 1: Read board part/serial DIDs (logged only, does not gate flash)
+        print("  Step 1: Board part/serial DIDs (0xF012-0xF015)")
+        for did in (0xF012, 0xF013, 0xF014, 0xF015):
+            try:
+                data = sess.read_did(did)
+                print(f"    0x{did:04X}: {data.decode('ascii', errors='replace').rstrip(chr(0))!r}")
+            except Exception:
+                pass
+
+        # Step 2: Enter programming session, then start keepalive
+        print("  Step 2: DiagnosticSessionControl(PROGRAMMING)")
+        sess.diagnostic_session(0x02)
+        print("  Starting TesterPresent keepalive...")
         sess.start_tester_present()
 
         try:
-            # Pre-flight: varifyCompAndFirmwareType — DID 0x0101
-            print("  Pre-flight: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
+            # Step 3: Verify component and firmware type
+            print("  Step 3: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
             comp_fw = sess.read_did(_DID_COMP_AND_FW_TYPE)
             if len(comp_fw) < 3:
-                _abort(f"DID 0x0101 response too short ({len(comp_fw)} bytes, expected 3)")
-            print(f"  component_key=0x{comp_fw[0]:02X}  fw_type=0x{comp_fw[1]:02X}  protocol_ver=0x{comp_fw[2]:02X}")
+                _abort(
+                    f"DID 0x0101 too short ({len(comp_fw)} bytes, expected 3)")
+            print(
+                f"    component_key=0x{comp_fw[0]:02X}"
+                f"  fw_type=0x{comp_fw[1]:02X}"
+                f"  protocol_ver=0x{comp_fw[2]:02X}")
 
-            # Step 1: Enter programming session
-            print("  Step 1: DiagnosticSessionControl(PROGRAMMING)")
-            sess.diagnostic_session(0x02)
-
-            # Step 2: Security access
-            print("  Step 2: SecurityAccess")
+            # Step 4: Security access
+            print("  Step 4: SecurityAccess")
             sess.security_access()
 
-            # Step 3: initializeEraseModule — RoutineControl 0xFF00
-            print("  Step 3: RoutineControl initializeEraseModule (0xFF00)")
+            # Step 5: Erase flash sectors
+            print("  Step 5: RC 0xFF00 initializeEraseModule")
             sess.routine_control(_ROUTINE_ERASE_FLASH, b"\x01")
 
-            # Step 4: checkCorrectComponentAndRev — RoutineControl 0x0202
-            print("  Step 4: RoutineControl checkCorrectComponentAndRev (0x0202)")
-            sess.routine_control(_ROUTINE_CHECK_COMP_REV)
-
-            # Steps 5-7: Per segment
+            # Step 6: Per-SHDR transfer loop
             for seg_idx, seg in enumerate(bhx_file.segments):
                 print(
-                    f"  [Segment {seg_idx}] target=0x{seg.start_address:08X} size={seg.length} bytes")
+                    f"  Step 6 [SHDR {seg_idx}]:"
+                    f" addr=0x{seg.start_address:08X}"
+                    f" size={seg.length} bytes")
 
-                # Step 5: RequestDownload
-                print(
-                    f"  Step 5: RequestDownload addr=0x{seg.start_address:08X} size={seg.length}")
-                max_block_len = sess.request_download(seg.start_address, seg.length)
-                print(f"         maxBlockLen={max_block_len}")
+                # 6a: RequestDownload
+                max_block_len = sess.request_download(
+                    seg.start_address, seg.length)
+                print(f"    RequestDownload → maxBlockLen={max_block_len}")
 
-                # Step 6: TransferData
+                # 6b: TransferData
+                chunk_size = max_block_len - 2
                 print(
-                    f"  Step 6: TransferData ({seg.length} bytes in chunks of {max_block_len - 2})")
+                    f"    TransferData ({seg.length} bytes,"
+                    f" {chunk_size}-byte chunks)")
                 sess.transfer_data(seg.data, max_block_len)
 
-                # Step 7: RequestTransferExit
-                print("  Step 7: RequestTransferExit")
+                # 6c: RequestTransferExit
+                print("    RequestTransferExit")
                 sess.request_transfer_exit()
 
-            # Step 9: checkModuleProgrammedCorrectly — RoutineControl 0x0201
-            print("  Step 9: RoutineControl checkModuleProgrammedCorrectly (0x0201)")
+                # 6d: Inter-SHDR re-auth + re-erase (GHDR v2 ramAppPayload only)
+                is_last_seg = seg_idx == len(bhx_file.segments) - 1
+                if needs_inter_shdr and not is_last_seg:
+                    _inter_shdr_cycle(sess)
+
+            # Step 7: Verify programming (CRC check)
+            print("  Step 7: RC 0x0201 checkModuleProgrammedCorrectly")
             sess.routine_control(_ROUTINE_VERIFY_CRC)
 
-        finally:
-            print("  Stopping TesterPresent thread...")
-            sess.stop_tester_present()
+            # Step 8: Verify component / revision match
+            print("  Step 8: RC 0x0202 checkCorrectComponentAndRev")
+            sess.routine_control(_ROUTINE_CHECK_COMP_REV)
 
-        # Step 10: ECU Reset (only after last firmware file)
-        if fw_index == len(selected) - 1:
-            print("  Step 10: ECUReset")
-            sess.ecu_reset(0x01)
-            print("  Flash complete.")
-        else:
-            print(f"  (continuing to next firmware file...)")
+        finally:
+            sess.stop_tester_present()
+            print("  TesterPresent stopped.")
+
+        # Step 9: Hard reset (wait for positive response), then done
+        print("  Step 9: ECUReset (hard reset, wait for response)")
+        sess.ecu_reset(0x01)
+        print("  Flash complete." if fw_index == len(selected) - 1
+              else "  Continuing to next firmware file...")
 
 
 def main() -> int:

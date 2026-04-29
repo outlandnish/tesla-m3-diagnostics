@@ -166,6 +166,10 @@ class UdsSession:
         resp = self._send_raw([_SID_ER, reset_type])
         self._check_positive(resp, _SID_ER)
 
+    def ecu_reset_no_wait(self, reset_type: int = 0x01) -> None:
+        """Send ECUReset with no response wait (soft reset / fire-and-forget)."""
+        self._send_raw([_SID_ER, reset_type])
+
     def clear_dtc(self, group: int = 0xFFFFFF) -> None:
         """ClearDiagnosticInformation (0x14) — group 0xFFFFFF clears all DTCs."""
         b = group.to_bytes(3, "big")
