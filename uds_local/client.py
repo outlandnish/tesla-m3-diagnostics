@@ -7,13 +7,11 @@ import time
 from typing import Any
 
 import can
-from uds import (
-    AddressingType,
-    NormalCanAddressingInformation,
-    PyCanTransportInterface,
-    UdsMessage,
-)
-from uds.transport_interface import AbstractUdsTransportInterface
+from uds.addressing import AddressingType
+from uds.can.addressing import NormalCanAddressingInformation
+from uds.can.transport_interface import PyCanTransportInterface
+from uds.message import UdsMessage
+from uds.transport_interface import AbstractTransportInterface
 
 from .node_config import NodeConfig
 from .security import compute_key
@@ -78,7 +76,7 @@ class UdsSession:
             rx_physical={"can_id": node.response_can_id},
             tx_physical={"can_id": node.request_can_id},
         )
-        self._transport: AbstractUdsTransportInterface = PyCanTransportInterface(
+        self._transport: AbstractTransportInterface = PyCanTransportInterface(
             network_manager=bus,
             addressing_information=addressing,
         )

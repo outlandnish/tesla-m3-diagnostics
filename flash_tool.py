@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 from flash_scripts import get_script
-from uds.client import UdsSession
+from uds_local.client import UdsSession
 
 _SCRIPT_DIR = Path(__file__).parent
 _DATA_DIR = _SCRIPT_DIR / "data"
@@ -82,7 +82,7 @@ def phase2_firmware_selection(
     node_name: str,
 ) -> list:
     """Load metadata and return selected FirmwareEntry list."""
-    from uds.metadata import load_metadata, find_firmware
+    from uds_local.metadata import load_metadata, find_firmware
 
     _print_section("Phase 2: Firmware Selection")
 
@@ -207,6 +207,38 @@ def phase3_preflight(
             )
 
 
+def phase4_dry_run(artifacts_dir: Path, selected: list) -> None:
+    """Print what would be flashed without sending any UDS frames."""
+    import bhx
+    _print_section("Phase 4: Dry Run — Flash Plan")
+
+    for entry in selected:
+        ecu_type = entry.component.lower()
+        try:
+            script, module_byte = get_script(ecu_type)
+        except KeyError as exc:
+            _abort(str(exc))
+
+        src = artifacts_dir / entry.src_path
+        bhx_file = bhx.parse_file(src)
+
+        step_names = [s.__name__ for s in script.steps]
+        print(f"\n  {entry.dest_name}  ({entry.src_path})")
+        print(f"    ecu_type:       {ecu_type}")
+        print(f"    module_byte:    0x{module_byte:02X}")
+        print(f"    security_level: {script.security_level}")
+        print(f"    erase_timeout:  {script.erase_timeout}s")
+        print(f"    steps:          {' → '.join(step_names)}")
+        print(f"    segments:")
+        for i, seg in enumerate(bhx_file.segments):
+            print(
+                f"      [{i}] addr=0x{seg.start_address:08X}"
+                f"  size={seg.length} bytes"
+            )
+
+    print("\n  (dry run complete — no frames sent)")
+
+
 def phase4_flash(
     sess: UdsSession,
     artifacts_dir: Path,
@@ -260,18 +292,57 @@ def main() -> int:
     )
     parser.add_argument("--force", action="store_true",
                         help="Skip pre-flight identity mismatch abort")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Print flash plan without sending any UDS frames")
+    parser.add_argument(
+        "--packed-key", type=lambda s: int(s, 0),
+        help=(
+            "Offline identity override (decimal or 0x hex). "
+            "Skips live ECU reads — implies --dry-run. "
+            "Use the packed_key printed by a previous run "
+            "(PPAA00UU from DID 0xF180)."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.packed_key is not None and not args.dry_run:
+        parser.error("--packed-key requires --dry-run")
 
     artifacts_dir = Path(args.artifacts).expanduser().resolve()
     if not artifacts_dir.is_dir():
         print(f"Error: artifacts directory not found: {artifacts_dir}")
         return 1
 
-    from uds.node_config import load_node_config
-
-    cfg = load_node_config(args.node, _NODES_JSON, _ETH_COMPACT, _ODJ_DIR)
+    from uds_local.node_config import load_node_config
 
     try:
+        if args.packed_key is not None:
+            # Offline path: no CAN connection needed
+            identity = {
+                "f180_raw": "(offline)",
+                "component_id": 0,
+                "pcba_id": (args.packed_key >> 24) & 0xFF,
+                "assembly_id": (args.packed_key >> 16) & 0xFF,
+                "usage_id": args.packed_key & 0xFF,
+                "packed_key": args.packed_key,
+                "lookup_key": f"{args.node.lower()}:{args.packed_key}",
+            }
+            _print_section("Phase 1: Identity (offline)")
+            print(f"  Node:        {args.node}")
+            print(f"  packed_key:  {args.packed_key}")
+            print(f"  lookup_key:  {identity['lookup_key']}")
+
+            selected = phase2_firmware_selection(
+                artifacts_dir, identity, args.node
+            )
+            phase3_preflight(
+                artifacts_dir, selected, identity, args.force
+            )
+            phase4_dry_run(artifacts_dir, selected)
+            return 0
+
+        cfg = load_node_config(args.node, _NODES_JSON, _ETH_COMPACT, _ODJ_DIR)
+
         with UdsSession(cfg, args.channel, interface=args.interface) as sess:
             sess.diagnostic_session(0x01)
             identity = phase1_identity(sess, args.node)
@@ -279,6 +350,10 @@ def main() -> int:
                 artifacts_dir, identity, args.node
             )
             phase3_preflight(artifacts_dir, selected, identity, args.force)
+
+            if args.dry_run:
+                phase4_dry_run(artifacts_dir, selected)
+                return 0
 
             confirm = input("\nProceed with flashing? [y/N] ").strip().lower()
             if confirm != "y":

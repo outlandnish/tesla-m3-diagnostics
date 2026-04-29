@@ -131,23 +131,59 @@ def _print_did_response(name: str, did_id: int, data: bytes, fields: dict[str, A
 # Node selection
 # ---------------------------------------------------------------------------
 
-def _pick_node(nodes: dict) -> str:
-    names = sorted(nodes.keys())
-    _hdr("Select ECU node")
-    for i, n in enumerate(names):
-        print(f"  [{i:2d}] {n}")
-    _setup_completion(names)
+def _pre_connection_menu(nodes: dict, channel: str, interface: str) -> str | None:
+    """Top-level menu shown before connecting. Returns a node name or None to quit."""
+    from uds_local.scanner import scan_network, print_scan_table
+
+    node_names = sorted(nodes.keys())
+    _setup_completion(["scan", "connect", "quit"] + node_names)
+
     while True:
-        raw = input("\nNode (name or index): ").strip()
-        if raw in nodes:
-            return raw
+        _hdr("diag_tool  —  not connected")
+        print("  scan            Probe all known nodes on the bus")
+        print("  connect <node>  Connect to a node by name")
+        print("  quit            Exit")
+
         try:
-            idx = int(raw)
-            if 0 <= idx < len(names):
-                return names[idx]
-        except ValueError:
-            pass
-        print(f"  Unknown: {raw!r}")
+            raw = input("\n  > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+
+        if not raw:
+            continue
+
+        parts = raw.split()
+        cmd = parts[0].lower()
+
+        if cmd in ("q", "quit", "exit"):
+            return None
+
+        elif cmd == "scan":
+            print(f"\n  Scanning on {channel}...")
+            try:
+                results = scan_network(channel, _NODES_JSON, _ETH_COMPACT, interface=interface)
+                print()
+                print_scan_table(results)
+                print()
+            except Exception as e:
+                print(f"  Scan error: {e}\n")
+
+        elif cmd == "connect":
+            if len(parts) < 2:
+                print("  Usage: connect <node>")
+                continue
+            name = parts[1].upper()
+            if name not in nodes:
+                print(f"  Unknown node {name!r}. Known: {', '.join(node_names)}")
+                continue
+            return name
+
+        else:
+            # bare node name shorthand
+            name = raw.upper()
+            if name in nodes:
+                return name
+            print(f"  Unknown command or node: {raw!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +191,7 @@ def _pick_node(nodes: dict) -> str:
 # ---------------------------------------------------------------------------
 
 def _show_identity(sess, cfg) -> None:
-    from uds.client import UdsError
+    from uds_local.client import UdsError
     try:
         data = sess.read_did(0xF180)
     except UdsError as e:
@@ -187,7 +223,7 @@ def _show_identity(sess, cfg) -> None:
 # ---------------------------------------------------------------------------
 
 def _did_menu(sess, cfg, odj_fields: dict[str, Any]) -> None:
-    from uds.client import UdsError
+    from uds_local.client import UdsError
 
     # Build readable DID list
     readable = {
@@ -270,7 +306,7 @@ def _did_menu(sess, cfg, odj_fields: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 def _routine_menu(sess, cfg) -> None:
-    from uds.client import UdsError
+    from uds_local.client import UdsError
 
     named = list(_NAMED_ROUTINES.keys())
     _setup_completion(named + ["back", "list"])
@@ -339,7 +375,7 @@ def _routine_menu(sess, cfg) -> None:
 # ---------------------------------------------------------------------------
 
 def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
-    from uds.client import UdsError
+    from uds_local.client import UdsError
 
     _hdr(f"Firmware update (DFU) — {cfg.name}")
 
@@ -429,7 +465,7 @@ def _main_menu(sess, cfg, odj_fields: dict[str, Any], artifacts_dir: Path | None
 
 
 def _session_cmd(sess) -> None:
-    from uds.client import UdsError
+    from uds_local.client import UdsError
     mode_map = {"default": 0x01, "programming": 0x02, "extended": 0x03, "safety": 0x04}
     raw = input("  Session (default/programming/extended/safety or 0xNN): ").strip().lower()
     mode = mode_map.get(raw)
@@ -448,7 +484,7 @@ def _session_cmd(sess) -> None:
 
 def _board_parts_cmd(sess) -> None:
     """Read board part/serial DIDs (opcode 14 — boardPartSerialNumberGet)."""
-    from uds.client import UdsError
+    from uds_local.client import UdsError
     print()
     for did_id, label in _BOARD_PART_DIDS:
         try:
@@ -460,7 +496,7 @@ def _board_parts_cmd(sess) -> None:
 
 
 def _clear_dtc_cmd(sess) -> None:
-    from uds.client import UdsError
+    from uds_local.client import UdsError
     confirm = input(
         "  ClearDiagnosticInformation (group 0xFFFFFF)? [y/N] "
     ).strip().lower()
@@ -474,7 +510,7 @@ def _clear_dtc_cmd(sess) -> None:
 
 
 def _reset_cmd(sess) -> None:
-    from uds.client import UdsError
+    from uds_local.client import UdsError
     confirm = input("  Send ECU hard reset? [y/N] ").strip().lower()
     if confirm != "y":
         return
@@ -491,8 +527,8 @@ def _reset_cmd(sess) -> None:
 
 def main() -> int:
     import argparse
-    from uds.node_config import load_node_config
-    from uds.client import UdsSession
+    from uds_local.node_config import load_node_config
+    from uds_local.client import UdsSession
 
     parser = argparse.ArgumentParser(description="Interactive Tesla Model 3 ECU diagnostic terminal")
     parser.add_argument("--node", "-n", help="ECU node name (e.g. PCS, CP). Prompts if omitted.")
@@ -503,16 +539,17 @@ def main() -> int:
 
     nodes = json.loads(_NODES_JSON.read_text())
 
-    node_name = args.node
-    if not node_name:
-        node_name = _pick_node(nodes)
-
-    node_name = node_name.upper()
-    if node_name not in nodes:
+    node_name = args.node.upper() if args.node else None
+    if node_name and node_name not in nodes:
         print(f"Error: unknown node {node_name!r}")
         return 1
 
     artifacts_dir = Path(args.artifacts).expanduser().resolve() if args.artifacts else None
+
+    if not node_name:
+        node_name = _pre_connection_menu(nodes, args.channel, args.interface)
+    if not node_name:
+        return 0
 
     try:
         cfg = load_node_config(node_name, _NODES_JSON, _ETH_COMPACT, _ODJ_DIR)

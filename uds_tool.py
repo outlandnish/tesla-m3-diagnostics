@@ -26,12 +26,12 @@ _ODJ_DIR = _DATA_DIR / "odj"
 
 
 def _load_config(node_name: str):
-    from uds.node_config import load_node_config
+    from uds_local.node_config import load_node_config
     return load_node_config(node_name, _NODES_JSON, _ETH_COMPACT, _ODJ_DIR)
 
 
 def _make_session(node_name: str, channel: str, interface: str):
-    from uds.client import UdsSession
+    from uds_local.client import UdsSession
     cfg = _load_config(node_name)
     return UdsSession(cfg, channel, interface=interface)
 
@@ -55,7 +55,7 @@ def _resolve_did(cfg, did_arg: str) -> tuple[int, str]:
 
 
 def cmd_scan(args: argparse.Namespace) -> None:
-    from uds.scanner import scan_network, print_scan_table
+    from uds_local.scanner import scan_network, print_scan_table
     print(f"Scanning {args.channel} ({args.interface})...")
     results = scan_network(
         args.channel, _NODES_JSON, _ETH_COMPACT,

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from uds.client import UdsSession
+    from uds_local.client import UdsSession
 
 # Routine IDs
 _RC_ERASE      = 0xFF00  # initializeEraseModule
@@ -100,7 +100,7 @@ def step_verify_comp_fw(sess: "UdsSession", ctx: FlashContext) -> None:
     print("  Step: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
     comp_fw = sess.read_did(0x0101)
     if len(comp_fw) < 3:
-        from uds.client import UdsError
+        from uds_local.client import UdsError
         raise UdsError(0x22, 0x00)
     print(
         f"    component_key=0x{comp_fw[0]:02X}"

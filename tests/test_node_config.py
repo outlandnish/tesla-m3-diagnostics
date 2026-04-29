@@ -2,7 +2,7 @@
 
 import pytest
 from pathlib import Path
-from uds.node_config import OdjEntry, NodeConfig, load_node_config, load_all_nodes
+from uds_local.node_config import OdjEntry, NodeConfig, load_node_config, load_all_nodes
 
 _DATA = Path(__file__).parent.parent / "data"
 _NODES_JSON = _DATA / "nodes.json"
