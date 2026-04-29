@@ -1,4 +1,4 @@
-# tm3-diagnostics
+# tm3diag
 
 Tesla Model 3 diagnostics tools for CAN
 
@@ -7,14 +7,14 @@ Tesla Model 3 diagnostics tools for CAN
 
 ## Tools
 
-### `diag_tool.py` — Interactive diagnostic terminal
+### `tm3diag.py` — Interactive diagnostic terminal
 
 Interactive terminal for exploring ECU state. When run without `--node`, opens a pre-connection menu where you can scan the bus for live nodes before connecting. Once connected, reads identity on startup then lets you read DIDs by name (with tab completion), run routines by name or hex ID, switch sessions, and trigger a firmware update — all in one session.
 
 ```
-python diag_tool.py --channel vcan0                          # opens pre-connection menu (scan / connect)
-python diag_tool.py --node PCS --channel vcan0
-python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
+python tm3diag.py --channel vcan0                          # opens pre-connection menu (scan / connect)
+python tm3diag.py --node PCS --channel vcan0
+python tm3diag.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 ```
 
 **Options**
@@ -28,53 +28,53 @@ python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 
 **Pre-connection commands** (shown when `--node` is omitted)
 
-| Command          | Description                                          |
-| ---------------- | ---------------------------------------------------- |
-| `scan`           | Probe all known nodes on the bus for TesterPresent   |
-| `connect <node>` | Connect to a node by name                            |
-| `quit`           | Exit                                                 |
+| Command          | Description                                        |
+| ---------------- | -------------------------------------------------- |
+| `scan`           | Probe all known nodes on the bus for TesterPresent |
+| `connect <node>` | Connect to a node by name                          |
+| `quit`           | Exit                                               |
 
 **Connected commands**
 
-| Command       | Description                                                                            |
-| ------------- | -------------------------------------------------------------------------------------- |
-| `dids`        | Read DIDs by name (tab complete) or hex ID; auto-decodes fields from ODJ               |
-| `routine`     | Run a routine by name or hex ID (see named routines below)                             |
-| `board-parts` | Read board part/serial DIDs `0xF012`–`0xF015`, `0xF030`/`0xF031` (opcode 14)           |
-| `clear-dtc`   | ClearDiagnosticInformation group `0xFFFFFF` (UDS 0x14)                                 |
-| `dfu`         | Full firmware update using `flash_tool` phases (identity → select → preflight → flash) |
-| `session`     | Switch diagnostic session                                                              |
-| `reset`       | ECU hard reset                                                                         |
-| `quit`        | Disconnect and exit                                                                    |
+| Command       | Description                                                                        |
+| ------------- | ---------------------------------------------------------------------------------- |
+| `dids`        | Read DIDs by name (tab complete) or hex ID; auto-decodes fields from ODJ           |
+| `routine`     | Run a routine by name or hex ID (see named routines below)                         |
+| `board-parts` | Read board part/serial DIDs `0xF012`–`0xF015`, `0xF030`/`0xF031` (opcode 14)       |
+| `clear-dtc`   | ClearDiagnosticInformation group `0xFFFFFF` (UDS 0x14)                             |
+| `dfu`         | Full firmware update using `dfu.py` phases (identity → select → preflight → flash) |
+| `session`     | Switch diagnostic session                                                          |
+| `reset`       | ECU hard reset                                                                     |
+| `quit`        | Disconnect and exit                                                                |
 
 **Named routines** (from hashpicker_sim VM opcode table)
 
-| Name                 | Routine ID | Description                                                      |
-| -------------------- | ---------- | ---------------------------------------------------------------- |
-| `erase`              | `0xFF00`   | `initializeEraseModule` — EraseMemory (requires security access) |
-| `verify-crc`         | `0x0201`   | `checkModuleProgrammedCorrectly` — CRC verify                    |
-| `check-component`    | `0x0202`   | `checkCorrectComponentAndRev`                                    |
-| `ota-wait`           | `0x0540`   | `vcWaitForOTAMode` / `otaStateRoutineControl`                    |
-| `ibst-power`         | `0x0543`   | `ibstPowerControl` (requires security access)                    |
-| `bms-inhibit`              | `0x0204`   | `bmsContactorControl` — inhibit contactor                 |
-| `bms-inhibit-open`         | `0x0304`   | `bmsContactorControl` — inhibit + open contactor          |
-| `disable-intrusion-sensor` | `0x0601`   | `disableIntrusionSensor`                                  |
+| Name                       | Routine ID | Description                                                      |
+| -------------------------- | ---------- | ---------------------------------------------------------------- |
+| `erase`                    | `0xFF00`   | `initializeEraseModule` — EraseMemory (requires security access) |
+| `verify-crc`               | `0x0201`   | `checkModuleProgrammedCorrectly` — CRC verify                    |
+| `check-component`          | `0x0202`   | `checkCorrectComponentAndRev`                                    |
+| `ota-wait`                 | `0x0540`   | `vcWaitForOTAMode` / `otaStateRoutineControl`                    |
+| `ibst-power`               | `0x0543`   | `ibstPowerControl` (requires security access)                    |
+| `bms-inhibit`              | `0x0204`   | `bmsContactorControl` — inhibit contactor                        |
+| `bms-inhibit-open`         | `0x0304`   | `bmsContactorControl` — inhibit + open contactor                 |
+| `disable-intrusion-sensor` | `0x0601`   | `disableIntrusionSensor`                                         |
 
 ---
 
-### `uds_tool.py` — UDS diagnostic CLI
+### `tm3uds.py` — UDS diagnostic CLI
 
 General-purpose UDS client for reading/writing DIDs, running routines, managing sessions, and scanning the network.
 
 ```
-python uds_tool.py scan --channel vcan0
-python uds_tool.py --node PCS --channel vcan0 read-did BOOTLOADER_VERSION
-python uds_tool.py --node PCS --channel vcan0 read-did 0xF180
-python uds_tool.py --node PCS --channel vcan0 write-did 0x0102 deadbeef
-python uds_tool.py --node PCS --channel vcan0 routine 0xFF00 01
-python uds_tool.py --node CP  --channel vcan0 security-access
-python uds_tool.py --node PCS --channel vcan0 session programming
-python uds_tool.py --node PCS --channel vcan0 reset
+python tm3uds.py scan --channel vcan0
+python tm3uds.py --node PCS --channel vcan0 read-did BOOTLOADER_VERSION
+python tm3uds.py --node PCS --channel vcan0 read-did 0xF180
+python tm3uds.py --node PCS --channel vcan0 write-did 0x0102 deadbeef
+python tm3uds.py --node PCS --channel vcan0 routine 0xFF00 01
+python tm3uds.py --node CP  --channel vcan0 security-access
+python tm3uds.py --node PCS --channel vcan0 session programming
+python tm3uds.py --node PCS --channel vcan0 reset
 ```
 
 **Subcommands**
@@ -100,13 +100,13 @@ python uds_tool.py --node PCS --channel vcan0 reset
 
 ---
 
-### `flash_tool.py` — Firmware flash CLI
+### `dfu.py` — Firmware flash CLI
 
 Flashes firmware to an ECU using the correct ECU-specific UDS programming sequence: identity discovery → firmware selection → pre-flight verification → flash. The flash sequence is selected automatically from `flash_scripts.py` based on the ECU type reported in `signed_metadata_map.tsv`, covering all 21 script variants reverse-engineered from `hashpicker_sim`.
 
 ```
-python flash_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
-python flash_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2 --force
+python dfu.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
+python dfu.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2 --force
 ```
 
 **Options**

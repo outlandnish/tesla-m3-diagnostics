@@ -2,14 +2,14 @@
 """Generic UDS CLI for Tesla Model 3 ECUs.
 
 Usage examples:
-  python uds_tool.py scan --channel vcan0
-  python uds_tool.py --node PCS --channel vcan0 read-did BOOTLOADER_VERSION
-  python uds_tool.py --node PCS --channel vcan0 read-did 0xF180
-  python uds_tool.py --node PCS --channel vcan0 write-did 0x0102 deadbeef
-  python uds_tool.py --node PCS --channel vcan0 routine 0xFF00 01
-  python uds_tool.py --node CP  --channel vcan0 security-access
-  python uds_tool.py --node PCS --channel vcan0 session programming
-  python uds_tool.py --node PCS --channel vcan0 reset
+  python tm3uds.py scan --channel vcan0
+  python tm3uds.py --node PCS --channel vcan0 read-did BOOTLOADER_VERSION
+  python tm3uds.py --node PCS --channel vcan0 read-did 0xF180
+  python tm3uds.py --node PCS --channel vcan0 write-did 0x0102 deadbeef
+  python tm3uds.py --node PCS --channel vcan0 routine 0xFF00 01
+  python tm3uds.py --node CP  --channel vcan0 security-access
+  python tm3uds.py --node PCS --channel vcan0 session programming
+  python tm3uds.py --node PCS --channel vcan0 reset
 """
 
 from __future__ import annotations

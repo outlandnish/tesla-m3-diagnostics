@@ -2,9 +2,9 @@
 """Interactive diagnostic terminal for Tesla Model 3 ECUs.
 
 Usage:
-  python diag_tool.py --channel vcan0
-  python diag_tool.py --node PCS --channel vcan0
-  python diag_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
+  python tm3diag.py --channel vcan0
+  python tm3diag.py --node PCS --channel vcan0
+  python tm3diag.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 """
 
 from __future__ import annotations
@@ -139,7 +139,7 @@ def _pre_connection_menu(nodes: dict, channel: str, interface: str) -> str | Non
     _setup_completion(["scan", "connect", "quit"] + node_names)
 
     while True:
-        _hdr("diag_tool  —  not connected")
+        _hdr("tm3diag  —  not connected")
         print("  scan            Probe all known nodes on the bus")
         print("  connect <node>  Connect to a node by name")
         print("  quit            Exit")
@@ -371,12 +371,12 @@ def _routine_menu(sess, cfg) -> None:
 
 
 # ---------------------------------------------------------------------------
-# DFU (firmware update via flash_tool phases)
+# DFU (firmware update via dfu.py phases)
 # ---------------------------------------------------------------------------
 
 def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
     from uds_local.client import UdsError
-    from flash_tool import run_flash
+    from dfu import run_flash
 
     _hdr(f"Firmware update (DFU) — {cfg.name}")
 

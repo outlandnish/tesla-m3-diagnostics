@@ -1,4 +1,4 @@
-"""Tests for uds_tool.py CLI argument parsing (no CAN hardware required)."""
+"""Tests for tm3uds.py CLI argument parsing (no CAN hardware required)."""
 
 import subprocess
 import sys
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-_TOOL = str(Path(__file__).parent.parent / "uds_tool.py")
+_TOOL = str(Path(__file__).parent.parent / "tm3uds.py")
 _PY = sys.executable
 
 

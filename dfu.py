@@ -2,8 +2,8 @@
 """Firmware flashing tool for Tesla Model 3 ECUs.
 
 Usage:
-  python flash_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
-  python flash_tool.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2 --force
+  python dfu.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
+  python dfu.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2 --force
 """
 
 from __future__ import annotations
