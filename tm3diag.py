@@ -27,7 +27,7 @@ _ODJ_DIR = _DATA_DIR / "odj"
 # opcode 12 → 0x0202  checkCorrectComponentAndRev
 # opcode 21/24 → 0x540  otaStateRoutineControl / vcWaitForOTAMode
 # opcode 25 → 0x543   ibstPowerControl
-# opcode 37 → 0x601   (unnamed)
+# opcode 37 → 0x601   disableIntrusionSensor
 # opcode 39 → 0x0204/0x0304  bmsContactorControl (inhibit / inhibit+open)
 _NAMED_ROUTINES: dict[str, tuple[int, str, bool]] = {
     "erase":              (0xFF00, "initializeEraseModule — EraseMemory", True),

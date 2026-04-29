@@ -51,19 +51,19 @@ StepFn = Callable[["UdsSession", FlashContext], None]
 # ---------------------------------------------------------------------------
 
 def step_soft_reset(sess: "UdsSession", ctx: FlashContext) -> None:
-    """ECUReset soft (fire-and-forget), then reconnect via TesterPresent."""
-    print("  Step: ECUReset (soft, no response wait)")
+    """ECUReset with suppressPositiveResponse (opcode 8 operand 1 — no response wait)."""
+    print("  Step: ECUReset (suppress response, no wait)")
     sess.ecu_reset_no_wait(0x01)
 
 
 def step_hard_reset(sess: "UdsSession", ctx: FlashContext) -> None:
-    """ECUReset hard (wait for positive response)."""
+    """ECUReset hard reset, wait for response (opcode 8 operand 0)."""
     print("  Step: ECUReset (hard reset, wait for response)")
     sess.ecu_reset(0x01)
 
 
 def step_hard_reset_with_retries(sess: "UdsSession", ctx: FlashContext) -> None:
-    """Hard reset with up to 3 retries and 10 s delay between attempts."""
+    """ECUReset hard reset with 3 retries + 10 s delay each (opcode 8 operand 2)."""
     print("  Step: ECUReset (hard reset, 3 retries + 10 s delay)")
     for attempt in range(3):
         try:
