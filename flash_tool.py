@@ -21,8 +21,9 @@ _ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
 _ODJ_DIR = _DATA_DIR / "odj"
 
 # DID 0xF180: bootloader/firmware version — read during identity discovery (phase 1)
-# DID 0x0101: component+firmware type validation — used by VM opcode 1 (varifyCompAndFirmwareType)
+# DID 0x0101: component+firmware type validation — opcode 1 (varifyCompAndFirmwareType)
 _DID_BOOTLOADER_VERSION = 0xF180
+_DID_COMP_AND_FW_TYPE = 0x0101
 
 # Flash sequence routine IDs (hashpicker_sim VM opcodes, UDS_VM_OPCODES.md)
 # opcode 9  → 0xFF00  initializeEraseModule
@@ -49,18 +50,18 @@ def phase1_identity(sess: UdsSession, node_name: str) -> dict:
     _print_section("Phase 1: Identity Discovery")
 
     f180 = sess.read_did(_DID_BOOTLOADER_VERSION)
-    if len(f180) < 6:
+    if len(f180) < 7:
         _abort(
-            f"DID 0xF180 response too short ({len(f180)} bytes, expected >=6)")
+            f"DID 0xF180 response too short ({len(f180)} bytes, expected >=7)")
 
-    # Layout: [MODULES:1][COMPONENT_ID:2][PCBA_ID:1][ASSEMBLY_ID:1][USAGE_ID:1][...]
+    # Layout: [MODULES:1][COMPONENT_ID:2][PCBA_ID:1][ASSEMBLY_ID:1][USAGE_ID:2][...]
     component_id = (f180[1] << 8) | f180[2]
     pcba_id = f180[3]
     assembly_id = f180[4]
-    usage_id = f180[5]
+    usage_id = (f180[5] << 8) | f180[6]
 
-    # version_map packed key: PPAA00UU (big-endian 32-bit)
-    packed = (pcba_id << 24) | (assembly_id << 16) | usage_id
+    # version_map packed key: PPAA00UU — low byte of usage_id (UU)
+    packed = (pcba_id << 24) | (assembly_id << 16) | (usage_id & 0xFF)
     lookup_key = f"{node_name.lower()}:{packed}"
 
     identity = {
@@ -152,7 +153,7 @@ def _decode_pcs_identity(data: bytes) -> dict | None:
         "component_id": (w0 >> 16) & 0xFFFF,
         "assembly_id": (w0 >> 8) & 0xFF,
         "pcba_id": w0 & 0xFF,
-        "usage_id": (w1 >> 16) & 0xFFFF,
+        "usage_id": (w1 >> 16) & 0xFFFF,  # high 16 bits of word 1
     }
 
 
@@ -211,6 +212,13 @@ def phase4_flash(sess: UdsSession, artifacts_dir: Path, selected: list) -> None:
         sess.start_tester_present()
 
         try:
+            # Pre-flight: varifyCompAndFirmwareType — DID 0x0101
+            print("  Pre-flight: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
+            comp_fw = sess.read_did(_DID_COMP_AND_FW_TYPE)
+            if len(comp_fw) < 3:
+                _abort(f"DID 0x0101 response too short ({len(comp_fw)} bytes, expected 3)")
+            print(f"  component_key=0x{comp_fw[0]:02X}  fw_type=0x{comp_fw[1]:02X}  protocol_ver=0x{comp_fw[2]:02X}")
+
             # Step 1: Enter programming session
             print("  Step 1: DiagnosticSessionControl(PROGRAMMING)")
             sess.diagnostic_session(0x02)

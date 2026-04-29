@@ -96,6 +96,9 @@ class UdsSession:
 
         # Request seed (sub-function 0x01)
         resp = self._send_raw([_SID_SA, 0x01])
+        # NRC 0x35 (requestSequenceError) means already unlocked — treat as success
+        if resp and resp[0] == 0x7F and len(resp) >= 3 and resp[2] == 0x35:
+            return
         self._check_positive(resp, _SID_SA)
         # Positive response: 67 01 <seed bytes>
         seed = bytes(resp[2:2 + buf_size])
@@ -141,7 +144,7 @@ class UdsSession:
         length_format = resp[1]
         max_block_len_size = (length_format >> 4) & 0xF
         max_block_len = int.from_bytes(resp[2:2 + max_block_len_size], "big")
-        return max_block_len
+        return min(max_block_len, 512)
 
     def transfer_data(self, payload: bytes, max_block_len: int) -> None:
         """Transfer payload in chunks. max_block_len includes the 1-byte sequence counter."""
@@ -153,7 +156,7 @@ class UdsSession:
             resp = self._send_raw([_SID_TD, seq] + list(chunk))
             self._check_positive(resp, _SID_TD)
             offset += len(chunk)
-            seq = (seq % 0xFF) + 1  # wrap 0x01..0xFF
+            seq = 0x00 if seq == 0xFF else seq + 1  # wrap 0xFF → 0x00
 
     def request_transfer_exit(self) -> None:
         resp = self._send_raw([_SID_RTE])

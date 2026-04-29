@@ -19,7 +19,7 @@ GlobalHeader (v2, 16 bytes):
   [0:4]   b'GHDR'
   [4:8]   uint32  version = 2
   [8:12]  uint32  total_payload_bytes
-  [12:16] uint32  total_size           (alternate / redundant total)
+  [12:16] uint32  ram_app_payload      (non-zero → inter-SHDR verify+auth+erase cycle)
 
 SegmentHeader (20 bytes):
   [0:4]   b'SHDR'
@@ -36,6 +36,8 @@ Notes
   service call.  hashpicker_sim's TransferData loop separately validates the
   ECU's 16-bit response checksum (either word-interleaved or byte-sum) against
   the transferred block, independent of this field.
+- GHDR v2 ram_app_payload: when non-zero and segment_count > 0, hashpicker_sim
+  runs a full verify+auth+erase cycle between SHDRs (see FIRMWARE_UPDATE.md Step 5b).
 - GHDR v2 has only been seen in the parser code path; no v2 files exist in
   the known artifact set.
 - Segments are stored contiguously with no padding between SegmentHeader and
@@ -88,7 +90,7 @@ class Segment:
 class BhxFile:
     segments: list[Segment] = field(default_factory=list)
     ghdr_version: int = 1      # 1 or 2
-    ghdr_total_size: int = 0   # only used when ghdr_version == 2
+    ram_app_payload: int = 0   # only used when ghdr_version == 2
 
     @property
     def total_payload_bytes(self) -> int:
@@ -128,14 +130,14 @@ def parse(data: bytes) -> BhxFile:
     if ghdr_version == 1:
         raw, offset = _read_exact(data, offset, 4)
         total_payload = struct.unpack('>I', raw)[0]
-        ghdr_total_size = 0
+        ram_app_payload = 0
     elif ghdr_version == 2:
         raw, offset = _read_exact(data, offset, 8)
-        total_payload, ghdr_total_size = struct.unpack('>II', raw)
+        total_payload, ram_app_payload = struct.unpack('>II', raw)
     else:
         raise BhxParseError(f"Unknown GHDR version: {ghdr_version}")
 
-    bhx = BhxFile(ghdr_version=ghdr_version, ghdr_total_size=ghdr_total_size)
+    bhx = BhxFile(ghdr_version=ghdr_version, ram_app_payload=ram_app_payload)
 
     # --- Segment headers + data ---
     while offset < len(data):
@@ -187,7 +189,7 @@ def build(bhx: BhxFile) -> bytes:
     if bhx.ghdr_version == 1:
         out += struct.pack('>4sII', b'GHDR', 1, total)
     elif bhx.ghdr_version == 2:
-        out += struct.pack('>4sIII', b'GHDR', 2, total, bhx.ghdr_total_size)
+        out += struct.pack('>4sIII', b'GHDR', 2, total, bhx.ram_app_payload)
     else:
         raise ValueError(f"Unknown GHDR version: {bhx.ghdr_version}")
 
@@ -236,7 +238,7 @@ def _cmd_info(path: Path) -> None:
         f"({bhx.total_payload_bytes})"
     )
     if bhx.ghdr_version == 2:
-        print(f"        total_size={bhx.ghdr_total_size:#010x}")
+        print(f"        total_size={bhx.ram_app_payload:#010x}")
     for i, seg in enumerate(bhx.segments, 1):
         crc = seg.compute_crc32()
         match = "OK" if seg.checksum == crc else "MISMATCH"
