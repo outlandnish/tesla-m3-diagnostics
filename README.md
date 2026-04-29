@@ -1,9 +1,9 @@
 # tesla-m3-diagnostics
 
+Tesla Model 3 diagnostics tools for CAN
+
 > **Untested against real hardware**
 > These tools have been developed and validated via dry-run and static analysis only. They have not yet been exercised against a live CAN network or real ECUs. Use with caution — bugs in the flash sequence or UDS session handling could leave an ECU in an unrecoverable state.
-
-Tesla Model 3 diagnostics tools for CAN
 
 ## Tools
 
