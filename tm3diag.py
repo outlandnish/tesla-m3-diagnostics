@@ -381,11 +381,20 @@ def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
 
     _hdr(f"Firmware update (DFU) — {cfg.name}")
 
+    import json
+    cache: dict = {}
+    if _CACHE_FILE.exists():
+        try:
+            cache = json.loads(_CACHE_FILE.read_text())
+        except Exception:
+            cache = {}
+
     if artifacts_dir is None:
+        cached_path = cache.get("artifacts_dir")
         cached = None
-        if _CACHE_FILE.exists():
+        if cached_path:
             try:
-                cached = Path(_CACHE_FILE.read_text().strip()).expanduser().resolve()
+                cached = Path(cached_path).expanduser().resolve()
                 if not cached.is_dir():
                     cached = None
             except Exception:
@@ -397,14 +406,22 @@ def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
             artifacts_dir_str = input("  Path to seed_artifacts_v2: ").strip()
             artifacts_dir = Path(artifacts_dir_str).expanduser().resolve()
 
-    if artifacts_dir.is_dir():
-        _CACHE_FILE.write_text(str(artifacts_dir))
-
     if not artifacts_dir.is_dir():
         print(f"  Artifacts directory not found: {artifacts_dir}")
         return
 
-    force = input("  Skip identity mismatch check? [y/N] ").strip().lower() == "y"
+    cache["artifacts_dir"] = str(artifacts_dir)
+
+    cached_force = cache.get("force", False)
+    default = "Y" if cached_force else "N"
+    force_input = input(f"  Skip identity mismatch check? [y/N] (last: {default}) ").strip().lower()
+    if force_input == "":
+        force = cached_force
+    else:
+        force = force_input == "y"
+    cache["force"] = force
+
+    _CACHE_FILE.write_text(json.dumps(cache))
 
     try:
         run_flash(sess, artifacts_dir, cfg.name, force=force)
