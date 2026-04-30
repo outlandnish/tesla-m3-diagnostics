@@ -8,7 +8,8 @@ from typing import Any
 
 import can
 from uds.addressing import AddressingType
-from uds.can.addressing import NormalCanAddressingInformation
+from uds.can.addressing import NormalCanAddressingInformation, CanAddressingFormat
+from uds.can.packet import CanPacket, CanPacketType
 from uds.can.transport_interface import PyCanTransportInterface
 from uds.message import UdsMessage
 
@@ -102,8 +103,15 @@ class UdsSession:
             self._tp_thread = None
 
     def _tp_loop(self) -> None:
+        tp_packet = CanPacket(
+            packet_type=CanPacketType.SINGLE_FRAME,
+            addressing_format=CanAddressingFormat.NORMAL_ADDRESSING,
+            addressing_type=AddressingType.PHYSICAL,
+            can_id=self._node.request_can_id,
+            payload=[_SID_TP, 0x80],
+        )
         while not self._tp_stop.wait(0.5):
-            self._send_raw([_SID_TP, 0x80])
+            self._transport.send_packet(tp_packet)
 
     # ------------------------------------------------------------------
     # UDS services
