@@ -297,14 +297,21 @@ def start_heartbeats() -> None:
     _hb_stop = threading.Event()
 
     def _run() -> None:
-        tick = 0  # counts 10ms ticks
-        # Initial burst: send all groups immediately so PCS doesn't MIA-fault on startup
+        # Initial burst so PCS doesn't MIA-fault during startup
         _send_10ms()
         _send_50ms()
         for slot in range(10):
             _send_100ms(slot)
+
+        # Absolute-time scheduling avoids drift from accumulated sleep jitter
+        tick = 0
+        next_tick = time.monotonic() + 0.010
         while not _hb_stop.is_set():
-            _hb_stop.wait(0.010)
+            now = time.monotonic()
+            delay = next_tick - now
+            if delay > 0:
+                _hb_stop.wait(delay)
+            next_tick += 0.010
             tick += 1
             _send_10ms()
             if tick % 5 == 0:
