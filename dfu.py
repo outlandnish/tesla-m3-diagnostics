@@ -217,9 +217,9 @@ def _parse_firmware(src: Path):
     ext = src.suffix.lower()
     if ext == ".bhx":
         return bhx.parse_file(src)
-    if ext in (".hex", ".img"):
+    if ext == ".hex":
         return ihex.parse_file(src)
-    raise ValueError(f"Unsupported firmware file type: {src.suffix!r}")
+    _abort(f"Unsupported firmware file type: {src.suffix!r} ({src.name})")
 
 
 def phase4_dry_run(artifacts_dir: Path, selected: list) -> None:
