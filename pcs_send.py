@@ -59,7 +59,10 @@ def _send(can_id: int, data: list[int] | bytes) -> None:
     """Send a CAN frame silently (no output). Used internally for heartbeats."""
     if _bus is None:
         return
-    _bus.send(can.Message(arbitration_id=can_id, data=bytes(data), is_extended_id=False))
+    try:
+        _bus.send(can.Message(arbitration_id=can_id, data=bytes(data), is_extended_id=False))
+    except can.CanOperationError:
+        pass  # drop frame on buffer-full; next tick will retry
 
 
 def raw(can_id: int, data: list[int] | bytes) -> None:
@@ -248,33 +251,35 @@ def _send_50ms() -> None:
     vcfront_heartbeat()
 
 
-def _send_100ms() -> None:
-    """Messages sent every 100ms."""
-    # Static config frames
-    _send(0x20A, [0xF6, 0x15, 0x09, 0x82, 0x18, 0x01])
-    _send(0x212, [0xB9, 0x1C, 0x94, 0xAD, 0xC3, 0x15, 0x06, 0x63])
-    _send(0x232, [0x0A, 0x02, 0xD5, 0x09, 0xCB, 0x04, 0x00, 0x00])
-    _send(0x25D, [0xD9, 0x8C, 0x01, 0xB5, 0x4A, 0xC1, 0x0A, 0xE0])
-    _send(0x321, [0x2C, 0xB6, 0xA8, 0x7F, 0x02, 0x7F, 0x00, 0x00])
+def _send_100ms(slot: int) -> None:
+    """Messages sent every 100ms, spread across 10 slots (one slot per 10ms tick).
 
-    # uiMia keepalive
-    _send(0x333, [0x04, 0x30, 0x29, 0x07])
-
-    # EVSE limits
-    a = int(DEFAULTS["evse_limit"] * 2)
-    _send(0x21D, [0x2D, a, 0x00, 0x80, 0x00, 0x60, 0x10, 0x00])
-
-    # Redundant AC current limit
-    ac = int(DEFAULTS["ac_limit"] * 2)
-    _send(0x23D, [0x0A, ac, 0xFF, 0x0F])
-
-    # Charge power request (off)
-    w = int(DEFAULTS["charge_power"])
-    _send(0x2B2, [w & 0xFF, (w >> 8) & 0xFF, 0x00, 0x00, 0x00])
-
-    # DCDC voltage setpoint
-    v_raw = int(DEFAULTS["dcdc_voltage"] * 100)
-    _send(0x3A1, [0x09, 0x62, v_raw & 0xFF, ((v_raw >> 8) & 0x0F) | 0x90, 0x08, 0x2C, 0x12, 0x5A])
+    Spreading avoids blasting all frames at once and overflowing the TX buffer.
+    """
+    if slot == 0:
+        _send(0x20A, [0xF6, 0x15, 0x09, 0x82, 0x18, 0x01])
+    elif slot == 1:
+        _send(0x212, [0xB9, 0x1C, 0x94, 0xAD, 0xC3, 0x15, 0x06, 0x63])
+    elif slot == 2:
+        _send(0x232, [0x0A, 0x02, 0xD5, 0x09, 0xCB, 0x04, 0x00, 0x00])
+    elif slot == 3:
+        _send(0x25D, [0xD9, 0x8C, 0x01, 0xB5, 0x4A, 0xC1, 0x0A, 0xE0])
+    elif slot == 4:
+        _send(0x321, [0x2C, 0xB6, 0xA8, 0x7F, 0x02, 0x7F, 0x00, 0x00])
+    elif slot == 5:
+        _send(0x333, [0x04, 0x30, 0x29, 0x07])
+    elif slot == 6:
+        a = int(DEFAULTS["evse_limit"] * 2)
+        _send(0x21D, [0x2D, a, 0x00, 0x80, 0x00, 0x60, 0x10, 0x00])
+    elif slot == 7:
+        ac = int(DEFAULTS["ac_limit"] * 2)
+        _send(0x23D, [0x0A, ac, 0xFF, 0x0F])
+    elif slot == 8:
+        w = int(DEFAULTS["charge_power"])
+        _send(0x2B2, [w & 0xFF, (w >> 8) & 0xFF, 0x00, 0x00, 0x00])
+    elif slot == 9:
+        v_raw = int(DEFAULTS["dcdc_voltage"] * 100)
+        _send(0x3A1, [0x09, 0x62, v_raw & 0xFF, ((v_raw >> 8) & 0x0F) | 0x90, 0x08, 0x2C, 0x12, 0x5A])
 
 
 def start_heartbeats() -> None:
@@ -293,18 +298,18 @@ def start_heartbeats() -> None:
 
     def _run() -> None:
         tick = 0  # counts 10ms ticks
-        # Send initial burst so PCS doesn't timeout during startup
+        # Initial burst: send all groups immediately so PCS doesn't MIA-fault on startup
         _send_10ms()
         _send_50ms()
-        _send_100ms()
+        for slot in range(10):
+            _send_100ms(slot)
         while not _hb_stop.is_set():
             _hb_stop.wait(0.010)
             tick += 1
             _send_10ms()
             if tick % 5 == 0:
                 _send_50ms()
-            if tick % 10 == 0:
-                _send_100ms()
+            _send_100ms(tick % 10)
 
     _hb_thread = threading.Thread(target=_run, daemon=True, name="pcs-heartbeat")
     _hb_thread.start()
