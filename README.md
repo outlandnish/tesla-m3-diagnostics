@@ -170,7 +170,7 @@ python pcs_send.py --channel can0
 **Available functions**
 
 | Function                           | Frame   | Description                                                  |
-| ---------------------------------- | ------- | ------------------------------------------------------------ | ------------ | --- | ----------------------- |
+| ---------------------------------- | ------- | ------------------------------------------------------------ |
 | `pcs_mode(mode, hv_voltage)`       | `0x22A` | Set PCS mode: `'off'`, `'charge'`, `'dcdc'`, `'both'`        |
 | `charger_enable(current_a)`        | `0x13D` | Enable charger with AC current limit                         |
 | `charger_disable()`                | `0x13D` | Disable charger                                              |
@@ -178,7 +178,8 @@ python pcs_send.py --channel can0
 | `dcdc_voltage(volts)`              | `0x3A1` | DCDC output voltage setpoint                                 |
 | `evse_limit(current_a)`            | `0x21D` | EVSE current limit                                           |
 | `bms_heartbeat()`                  | `0x3B2` | One BMS keepalive frame                                      |
-| `vcfront_heartbeat()`              | `0x545` | One VCFront keepalive frame (with counter + checksum)        | \_id, data)` | any | Send an arbitrary frame |
+| `vcfront_heartbeat()`              | `0x545` | One VCFront keepalive frame (with counter + checksum)        |
+| `raw(can_id, data)`                | any     | Send an arbitrary frame                                      |
 | `start_heartbeats()`               | —       | Background BMS@10ms + VCFront@50ms keepalives                |
 | `stop_heartbeats()`                | —       | Stop background heartbeats                                   |
 | `start_listener(node)`             | —       | Print decoded incoming frames to terminal (default: `'PCS'`) |

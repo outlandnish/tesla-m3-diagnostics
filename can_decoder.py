@@ -1,4 +1,4 @@
-"""CAN signal decoder for Model3_ETH.compact.json."""
+"""CAN signal decoder for Model3_ETH.compact.json or a DBC file."""
 
 from __future__ import annotations
 
@@ -65,7 +65,9 @@ def _is_hex_signal(sig: dict[str, Any], name: str) -> bool:
     return sig.get("width", 0) % 8 == 0 and ("hash" in lower or "crc" in lower)
 
 
-def _int_to_hex(value: int, width_bits: int) -> str:
+def _int_to_hex(value: int, width_bits: int) -> str | None:
+    if value == 0:
+        return None
     return value.to_bytes(width_bits // 8, "little").hex()
 
 
@@ -98,7 +100,7 @@ def decode_signal(data: bytes, sig: dict[str, Any], name: str = "") -> tuple[flo
 
 
 class CanDatabase:
-    """Parsed representation of the compact JSON database."""
+    """Parsed representation of a compact JSON or DBC CAN database."""
 
     def __init__(self, path: Path = _ETH_COMPACT) -> None:
         with open(path) as f:
@@ -106,6 +108,7 @@ class CanDatabase:
 
         self.messages: dict[int, dict[str, Any]] = {}  # msg_id -> msg
         self._by_node: dict[str, list[int]] = {}
+        self._cantools_db = None
 
         for name, msg in raw["messages"].items():
             mid = msg["message_id"]
@@ -113,6 +116,53 @@ class CanDatabase:
             self.messages[mid] = msg
             node = msg.get("originNode", "unknown")
             self._by_node.setdefault(node, []).append(mid)
+
+    @classmethod
+    def from_dbc(cls, path: Path) -> "CanDatabase":
+        import cantools
+        ct_db = cantools.database.load_file(str(path))
+
+        obj = cls.__new__(cls)
+        obj.messages = {}
+        obj._by_node = {}
+        obj._cantools_db = ct_db
+
+        for ct_msg in ct_db.messages:
+            sender = ct_msg.senders[0] if ct_msg.senders else "unknown"
+            signals: dict[str, Any] = {}
+            for sig in ct_msg.signals:
+                vd = None
+                if sig.choices:
+                    # cantools choices: {int_value: "label"} — invert to match
+                    # compact JSON convention {label: int_value}
+                    vd = {str(label): int(val) for val, label in sig.choices.items()}
+                signals[sig.name] = {
+                    "start_position": sig.start,
+                    "width": sig.length,
+                    "endianness": "LITTLE" if sig.byte_order == "little_endian" else "BIG",
+                    "signedness": "SIGNED" if sig.is_signed else "UNSIGNED",
+                    "scale": sig.scale if sig.scale is not None else 1,
+                    "offset": sig.offset if sig.offset is not None else 0,
+                    "min": sig.minimum if sig.minimum is not None else 0,
+                    "max": sig.maximum if sig.maximum is not None else 0,
+                    "units": sig.unit or "",
+                    "is_muxer": sig.is_multiplexer,
+                    "mux_id": sig.multiplexer_ids[0] if sig.multiplexer_ids else None,
+                    "value_description": vd,
+                    "receivers": list(sig.receivers),
+                }
+            msg_entry: dict[str, Any] = {
+                "message_id": ct_msg.frame_id,
+                "name": ct_msg.name,
+                "length_bytes": ct_msg.length,
+                "originNode": sender,
+                "cycle_time": ct_msg.cycle_time or 0,
+                "signals": signals,
+            }
+            obj.messages[ct_msg.frame_id] = msg_entry
+            obj._by_node.setdefault(sender, []).append(ct_msg.frame_id)
+
+        return obj
 
     def nodes(self) -> list[str]:
         return sorted(self._by_node.keys())

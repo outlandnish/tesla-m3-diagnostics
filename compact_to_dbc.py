@@ -87,8 +87,7 @@ def convert(src: Path, dst: Path) -> None:
     for msg_name, msg in sorted(messages.items(), key=lambda kv: kv[1]["message_id"]):
         msg_id = msg["message_id"]
         length = msg.get("length_bytes", 8)
-        senders = msg.get("senders") or [msg.get("originNode", "Vector__XXX")]
-        sender = _sanitize(senders[0]) if senders else "Vector__XXX"
+        sender = _sanitize(msg.get("originNode") or (msg.get("senders") or ["Vector__XXX"])[0])
 
         lines.append(f"BO_ {msg_id} {_sanitize(msg_name)}: {length} {sender}")
 

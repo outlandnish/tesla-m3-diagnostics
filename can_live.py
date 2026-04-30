@@ -25,7 +25,7 @@ from aiohttp import web
 from can_decoder import CanDatabase
 
 _STATIC_DIR = Path(__file__).parent / "can_live_ui"
-_DB = CanDatabase()
+_DB: CanDatabase = None  # type: ignore[assignment]  — set in main() before use
 
 log = logging.getLogger("can_live")
 
@@ -66,6 +66,7 @@ async def _ws_handler(request: web.Request) -> web.WebSocketResponse:
                         {
                             "id": m["message_id"],
                             "name": m["name"],
+                            "cycle_time": m.get("cycle_time", 0),
                             "signals": [
                                 {
                                     "signal": sname,
@@ -179,6 +180,7 @@ async def _api_db(request: web.Request) -> web.Response:
             msgs.append({
                 "id": m["message_id"],
                 "name": m["name"],
+                "cycle_time": m.get("cycle_time", 0),
                 "signals": signals,
             })
         payload[node] = msgs
@@ -208,9 +210,17 @@ def main() -> None:
     _cfg.apply_defaults(parser)
     parser.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
     parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    parser.add_argument("--dbc", type=Path, default=None, help="Load a DBC file instead of the default compact JSON")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+
+    global _DB
+    if args.dbc:
+        _DB = CanDatabase.from_dbc(args.dbc)
+        log.info("Loaded DBC: %s (%d messages)", args.dbc, len(_DB.messages))
+    else:
+        _DB = CanDatabase()
 
     kwargs: dict = {"channel": args.channel, "interface": args.interface}
     if args.bitrate:

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Model 3 Live CAN</title>
+<title>CAN Live Viewer</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -318,7 +318,7 @@
 <div id="tab-live" class="tab-view active">
   <div class="sidebar">
     <div class="sidebar-header">
-      <span>Model 3 CAN</span>
+      <span>CAN Live Viewer</span>
       ECU nodes
     </div>
     <div id="node-list" class="node-list"><div style="padding:12px;color:var(--text-dim)">Connecting…</div></div>
@@ -334,7 +334,6 @@
     </div>
     <div id="table-wrap" class="table-wrap">
       <div id="placeholder" class="placeholder">
-        <div class="big">⚡</div>
         <div>Choose an ECU node from the sidebar</div>
       </div>
     </div>
@@ -441,7 +440,7 @@ function handleSchema(msg) {
   placeholder.style.display = 'none';
   filterInput.style.display = '';
   msg.messages.forEach(m => {
-    msgState.set(m.id, { name: m.name, lastTs: null, signals: {} });
+    msgState.set(m.id, { name: m.name, lastTs: null, cycleTime: m.cycle_time || 0, signals: {} });
     m.signals.forEach(s => {
       msgState.get(m.id).signals[s.signal] = { value: '—', label: null, units: s.units };
     });
@@ -562,7 +561,8 @@ setInterval(() => {
     if (!state || state.lastTs === null) return;
     const age = now - state.lastTs;
     dom.ageEl.textContent = age < 10 ? `${age.toFixed(1)}s` : `${age.toFixed(0)}s`;
-    dom.ageEl.className = 'msg-age' + (age > 1.0 ? ' stale' : '');
+    const staleThreshold = state.cycleTime ? (state.cycleTime * 3) / 1000 : 1.0;
+    dom.ageEl.className = 'msg-age' + (age > staleThreshold ? ' stale' : '');
   });
 }, 250);
 
