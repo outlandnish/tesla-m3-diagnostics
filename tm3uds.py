@@ -159,13 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Tesla Model 3 UDS diagnostic tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-
-    # Parent parser for shared arguments
-    parent_common = argparse.ArgumentParser(add_help=False)
-    parent_common.add_argument(
+    parser.add_argument(
         "--channel", "-c", default="vcan0",
         help="CAN interface (default: vcan0)")
-    parent_common.add_argument(
+    parser.add_argument(
         "--interface", "-i", default="socketcan",
         help="python-can interface type")
 
@@ -178,7 +175,6 @@ def build_parser() -> argparse.ArgumentParser:
     # scan
     p_scan = sub.add_parser(
         "scan", help="Probe all nodes for TesterPresent response",
-        parents=[parent_common],
     )
     p_scan.add_argument(
         "--timeout", type=float, default=0.1, help="Per-node timeout (s)")
@@ -187,7 +183,7 @@ def build_parser() -> argparse.ArgumentParser:
     # read-did
     p_rdid = sub.add_parser(
         "read-did", help="Read a DID (0x22)",
-        parents=[parent_common, parent_node],
+        parents=[parent_node],
     )
     p_rdid.add_argument("did", help="DID name or 0xHEX id")
     p_rdid.set_defaults(func=cmd_read_did)
@@ -195,7 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     # write-did
     p_wdid = sub.add_parser(
         "write-did", help="Write a DID (0x2E)",
-        parents=[parent_common, parent_node],
+        parents=[parent_node],
     )
     p_wdid.add_argument("did", help="DID name or 0xHEX id")
     p_wdid.add_argument("data", help="Hex data to write (no spaces required)")
@@ -204,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     # routine
     p_rc = sub.add_parser(
         "routine", help="Execute a RoutineControl (0x31 01)",
-        parents=[parent_common, parent_node],
+        parents=[parent_node],
     )
     p_rc.add_argument("routine_id", help="Routine ID in hex (e.g. 0xFF00)")
     p_rc.add_argument(
@@ -215,14 +211,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_sa = sub.add_parser(
         "security-access",
         help="Enter programming session + full seed/key exchange",
-        parents=[parent_common, parent_node],
+        parents=[parent_node],
     )
     p_sa.set_defaults(func=cmd_security_access)
 
     # session
     p_sess = sub.add_parser(
         "session", help="Switch diagnostic session",
-        parents=[parent_common, parent_node],
+        parents=[parent_node],
     )
     p_sess.add_argument(
         "mode",
@@ -232,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     # reset
     p_rst = sub.add_parser(
         "reset", help="ECU hard reset (0x11 01)",
-        parents=[parent_common, parent_node],
+        parents=[parent_node],
     )
     p_rst.set_defaults(func=cmd_reset)
 
@@ -240,7 +236,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_cdtc = sub.add_parser(
         "clear-dtc",
         help="ClearDiagnosticInformation (0x14) — group 0xFFFFFF",
-        parents=[parent_common, parent_node],
+        parents=[parent_node],
     )
     p_cdtc.set_defaults(func=cmd_clear_dtc)
 
