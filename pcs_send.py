@@ -54,14 +54,20 @@ _bms_mux = 0              # BMS heartbeat alternates between two frames
 _bus: can.BusABC | None = None
 
 
+def _send(can_id: int, data: list[int] | bytes) -> None:
+    """Send a CAN frame silently (no output). Used internally for heartbeats."""
+    if _bus is None:
+        return
+    _bus.send(can.Message(arbitration_id=can_id, data=bytes(data), is_extended_id=False))
+
+
 def raw(can_id: int, data: list[int] | bytes) -> None:
-    """Send an arbitrary CAN frame. data is a list of bytes or a bytes object."""
+    """Send an arbitrary CAN frame and print confirmation."""
     if _bus is None:
         print("Bus not connected")
         return
-    msg = can.Message(arbitration_id=can_id, data=bytes(data), is_extended_id=False)
-    _bus.send(msg)
-    print(f"TX  0x{can_id:03X}  [{len(data)}]  {data.hex() if isinstance(data, bytes) else bytes(data).hex()}")
+    _send(can_id, data)
+    print(f"TX  0x{can_id:03X}  [{len(data)}]  {bytes(data).hex()}")
 
 
 # ---------------------------------------------------------------------------
@@ -140,9 +146,9 @@ def bms_heartbeat() -> None:
         mux = _bms_mux
         _bms_mux ^= 1
     if mux == 0:
-        raw(0x3B2, [0x00, 0xF4, 0x01, 0x26, 0x00, 0x00, 0x00, 0x00])
+        _send(0x3B2, [0x00, 0xF4, 0x01, 0x26, 0x00, 0x00, 0x00, 0x00])
     else:
-        raw(0x3B2, [0x01, 0xF4, 0x01, 0x26, 0x00, 0x00, 0x00, 0x00])
+        _send(0x3B2, [0x01, 0xF4, 0x01, 0x26, 0x00, 0x00, 0x00, 0x00])
 
 
 def vcfront_heartbeat() -> None:
@@ -154,7 +160,7 @@ def vcfront_heartbeat() -> None:
     payload = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, (ctr << 4) & 0xFF, 0x00]
     checksum = (sum(payload[:7]) + 0x45 + 0x05) & 0xFF  # CAN ID 0x545
     payload[7] = checksum
-    raw(0x545, payload)
+    _send(0x545, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -272,12 +278,17 @@ def start_listener(node: str = "PCS") -> None:
         print("Warning: CanDatabase not available, will show raw frames only")
 
     _listener_stop = threading.Event()
+    _last_data: dict[int, bytes] = {}
 
     def _run() -> None:
         while not _listener_stop.is_set():
             msg = _bus.recv(timeout=0.1)
             if msg is None:
                 continue
+            data = bytes(msg.data)
+            if _last_data.get(msg.arbitration_id) == data:
+                continue
+            _last_data[msg.arbitration_id] = data
             if _DB:
                 db_msg = _DB.messages.get(msg.arbitration_id)
                 if db_msg is None:
@@ -285,7 +296,7 @@ def start_listener(node: str = "PCS") -> None:
                 origin = db_msg.get("originNode", "")
                 if node and origin != node:
                     continue
-                decoded = _DB.decode_frame(msg.arbitration_id, bytes(msg.data))
+                decoded = _DB.decode_frame(msg.arbitration_id, data)
                 signals_str = "  ".join(
                     f"{s['signal']}={s['value']}{s.get('units','')}"
                     + (f"({s['label']})" if s.get("label") else "")
@@ -293,8 +304,7 @@ def start_listener(node: str = "PCS") -> None:
                 )
                 print(f"\nRX  0x{msg.arbitration_id:03X}  {db_msg['name']}  {signals_str}")
             else:
-                data_hex = bytes(msg.data).hex()
-                print(f"\nRX  0x{msg.arbitration_id:03X}  [{msg.dlc}]  {data_hex}")
+                print(f"\nRX  0x{msg.arbitration_id:03X}  [{msg.dlc}]  {data.hex()}")
 
     _listener_thread = threading.Thread(target=_run, daemon=True, name="pcs-listener")
     _listener_thread.start()
