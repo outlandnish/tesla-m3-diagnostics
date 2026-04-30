@@ -274,14 +274,8 @@ def phase4_flash(
         bhx_file = _parse_firmware(src)
 
         print(f"  Script: {script}  module=0x{module_byte:02X}")
-        print("  Starting TesterPresent keepalive...")
-        sess.start_tester_present()
-        try:
-            script.module_byte = module_byte
-            script.run(sess, bhx_file, entry)
-        finally:
-            sess.stop_tester_present()
-            print("  TesterPresent stopped.")
+        script.module_byte = module_byte
+        script.run(sess, bhx_file, entry)
 
         if fw_index < len(selected) - 1:
             print("  Continuing to next firmware file...")

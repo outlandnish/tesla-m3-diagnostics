@@ -91,6 +91,16 @@ def step_board_info(sess: "UdsSession", ctx: FlashContext) -> None:
             pass
 
 
+def step_start_tester_present(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: TesterPresent keepalive start")
+    sess.start_tester_present()
+
+
+def step_stop_tester_present(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: TesterPresent keepalive stop")
+    sess.stop_tester_present()
+
+
 def step_programming_session(sess: "UdsSession", ctx: FlashContext) -> None:
     print("  Step: DiagnosticSessionControl(PROGRAMMING)")
     sess.diagnostic_session(0x02)
@@ -126,10 +136,12 @@ def step_erase(sess: "UdsSession", ctx: FlashContext) -> None:
     """RC 0xFF00 initializeEraseModule with extended timeout."""
     print(f"  Step: RC 0xFF00 initializeEraseModule (P2={ctx.erase_timeout}s)")
     sess.set_timeout(ctx.erase_timeout)
+    sess.start_tester_present()
     try:
         sess.routine_control(_RC_ERASE, b"\x01")
     finally:
         sess.set_timeout(3.0)
+        sess.stop_tester_present()
 
 
 def step_transfer_loop(sess: "UdsSession", ctx: FlashContext) -> None:
