@@ -161,6 +161,9 @@ def phase3_preflight(
 
     for entry in selected:
         src = artifacts_dir / entry.src_path
+        if src.suffix.lower() != ".bhx":
+            print(f"  {entry.src_path}: not a BHX file, skipping pre-flight check")
+            continue
         bhx_file = bhx.parse_file(src)
         found_identity = False
         for seg in bhx_file.segments:

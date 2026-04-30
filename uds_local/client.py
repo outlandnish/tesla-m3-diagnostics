@@ -302,6 +302,11 @@ class UdsSession:
     def __exit__(self, *_: Any) -> None:
         self.stop_tester_present()
         try:
+            if self._transport.notifier is not None:
+                self._transport.notifier.stop()
+        except Exception:
+            pass
+        try:
             self._bus.shutdown()
         except Exception:
             pass
