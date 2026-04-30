@@ -54,6 +54,7 @@ def step_soft_reset(sess: "UdsSession", ctx: FlashContext) -> None:
     """ECUReset with suppressPositiveResponse (opcode 8 operand 1 — no response wait)."""
     print("  Step: ECUReset (suppress response, no wait)")
     sess.ecu_reset_no_wait(0x01)
+    sess.sleep(0.5)
 
 
 def step_hard_reset(sess: "UdsSession", ctx: FlashContext) -> None:
