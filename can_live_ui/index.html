@@ -576,20 +576,29 @@ setInterval(() => {
 
 filterInput.addEventListener('input', applyFilter);
 
+function makeFilterTerms(raw) {
+  // Split on commas, convert each term's * wildcards to a regex
+  return raw.split(',').map(t => {
+    const s = t.trim().toLowerCase();
+    if (!s) return null;
+    const re = new RegExp(s.split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*'));
+    return re;
+  }).filter(Boolean);
+}
+
 function applyFilter() {
-  const q = filterInput.value.trim().toLowerCase();
+  const terms = makeFilterTerms(filterInput.value);
   msgDom.forEach((dom) => {
     let msgVisible = false;
     Object.entries(dom.rows).forEach(([sig, { tr, charGroup }]) => {
       const isStrRow = sig.startsWith('__str__');
       const isCharRow = CHAR_RE.test(sig);
       if (isCharRow) {
-        // always hidden — represented by the string row
         tr.style.display = 'none';
         return;
       }
-      const label = isStrRow ? sig.replace('__str__', '') : sig;
-      const show = !q || label.toLowerCase().includes(q);
+      const label = (isStrRow ? sig.replace('__str__', '') : sig).toLowerCase();
+      const show = terms.length === 0 || terms.some(re => re.test(label));
       tr.style.display = show ? '' : 'none';
       if (show) msgVisible = true;
     });
