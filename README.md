@@ -22,9 +22,9 @@ python tm3diag.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 | Flag                | Default     | Description                                                       |
 | ------------------- | ----------- | ----------------------------------------------------------------- |
 | `--node`, `-n`      | —           | ECU node name. Opens pre-connection menu if omitted.              |
-| `--channel`, `-c`   | `vcan0`     | CAN interface                                                     |
-| `--interface`, `-i` | `socketcan` | python-can interface type                                         |
-| `--artifacts`, `-a` | —           | Path to `seed_artifacts_v2` (needed for DFU; prompted if missing) |
+| `--channel`, `-c`   | `TM3_CHANNEL`   | CAN interface                                                     |
+| `--interface`, `-i` | `TM3_INTERFACE` | python-can interface type                                         |
+| `--artifacts`, `-a` | `TM3_ARTIFACTS_DIR` | Path to `seed_artifacts_v2` (needed for DFU; prompted if missing) |
 
 **Pre-connection commands** (shown when `--node` is omitted)
 
@@ -94,9 +94,9 @@ python tm3uds.py --node PCS --channel vcan0 reset
 
 | Flag                | Default     | Description                             |
 | ------------------- | ----------- | --------------------------------------- |
-| `--node`, `-n`      | —           | ECU node name (e.g. `PCS`, `CP`, `RCM`) |
-| `--channel`, `-c`   | `vcan0`     | CAN interface                           |
-| `--interface`, `-i` | `socketcan` | python-can interface type               |
+| `--node`, `-n`      | —               | ECU node name (e.g. `PCS`, `CP`, `RCM`) |
+| `--channel`, `-c`   | `TM3_CHANNEL`   | CAN interface                           |
+| `--interface`, `-i` | `TM3_INTERFACE` | python-can interface type               |
 
 ---
 
@@ -113,11 +113,11 @@ python dfu.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2 --force
 
 | Flag                | Default     | Description                             |
 | ------------------- | ----------- | --------------------------------------- |
-| `--node`, `-n`      | —           | ECU node name                           |
-| `--channel`, `-c`   | `vcan0`     | CAN interface                           |
-| `--interface`, `-i` | `socketcan` | python-can interface type               |
-| `--artifacts`, `-a` | —           | Path to `seed_artifacts_v2` directory   |
-| `--force`           | —           | Proceed despite BHX identity mismatches |
+| `--node`, `-n`      | —                   | ECU node name                           |
+| `--channel`, `-c`   | `TM3_CHANNEL`       | CAN interface                           |
+| `--interface`, `-i` | `TM3_INTERFACE`     | python-can interface type               |
+| `--artifacts`, `-a` | `TM3_ARTIFACTS_DIR` | Path to `seed_artifacts_v2` directory   |
+| `--force`           | —                   | Proceed despite BHX identity mismatches |
 
 The tool reads `signed_metadata_map.tsv` from the artifacts directory to select the correct firmware file for the connected ECU's identity (PCBA_ID / ASSEMBLY_ID / USAGE_ID).
 
@@ -150,6 +150,58 @@ bhx.build_file(bhx_file, "out.bhx")
 
 ---
 
+### `pcs_send.py` — Interactive PCS CAN scripting shell
+
+Interactive Python REPL (IPython if available, otherwise stdlib) for experimenting with Tesla PCS CAN control messages. Runs alongside `can_live.py` on the same interface — frames you send appear in the live viewer in real time.
+
+```
+python pcs_send.py
+python pcs_send.py --channel can0
+```
+
+**Options**
+
+| Flag          | Default     | Description               |
+| ------------- | ----------- | ------------------------- |
+| `--channel`   | `vcan0`     | CAN interface             |
+| `--interface` | `socketcan` | python-can interface type |
+| `--bitrate`   | —           | CAN bitrate (optional)    |
+
+**Available functions**
+
+| Function | Frame | Description |
+| --- | --- | --- |
+| `pcs_mode(mode, hv_voltage)` | `0x22A` | Set PCS mode: `'off'`, `'charge'`, `'dcdc'`, `'both'` |
+| `charger_enable(current_a)` | `0x13D` | Enable charger with AC current limit |
+| `charger_disable()` | `0x13D` | Disable charger |
+| `charge_power(watts, on)` | `0x2B2` | Charge power request in watts |
+| `dcdc_voltage(volts)` | `0x3A1` | DCDC output voltage setpoint |
+| `evse_limit(current_a)` | `0x21D` | EVSE current limit |
+| `bms_heartbeat()` | `0x3B2` | One BMS keepalive frame |
+| `vcfront_heartbeat()` | `0x545` | One VCFront keepalive frame (with counter + checksum) |
+| `raw(can_id, data)` | any | Send an arbitrary frame |
+| `start_heartbeats()` | — | Background BMS@10ms + VCFront@50ms keepalives |
+| `stop_heartbeats()` | — | Stop background heartbeats |
+| `start_listener(node)` | — | Print decoded incoming frames to terminal (default: `'PCS'`) |
+| `stop_listener()` | — | Stop listener |
+| `send_loop(name, fn, interval_ms)` | — | Repeat any callable at a fixed interval |
+| `stop_loop(name)` | — | Stop a named loop |
+| `list_loops()` | — | Show active loops |
+
+**`DEFAULTS` dict** — tune once, all helpers pick it up:
+
+```python
+DEFAULTS['hv_voltage']   = 400    # V
+DEFAULTS['ac_limit']     = 32     # A
+DEFAULTS['dcdc_voltage'] = 13.8   # V
+DEFAULTS['charge_power'] = 0      # W
+DEFAULTS['evse_limit']   = 32     # A
+```
+
+The PCS requires `0x3B2` (BMS) and `0x545` (VCFront) heartbeats at fixed rates or it raises `bmsMia`/`vcfrontMia` faults. Call `start_heartbeats()` before sending any control frames.
+
+---
+
 ### `can_live.py` — Live CAN signal viewer
 
 Web-based live viewer that decodes CAN frames in real time using `Model3_ETH.compact.json`. Select an ECU node from the sidebar to see all its signals updating live, with age indicators and enum labels.
@@ -163,13 +215,13 @@ Opens `http://localhost:8765` automatically in your browser.
 
 **Options**
 
-| Flag           | Default     | Description                      |
-| -------------- | ----------- | -------------------------------- |
-| `--channel`    | `vcan0`     | CAN interface                    |
-| `--interface`  | `socketcan` | python-can interface type        |
-| `--bitrate`    | —           | CAN bitrate (optional)           |
-| `--port`       | `8765`      | HTTP/WebSocket port              |
-| `--no-browser` | —           | Don't auto-open browser on start |
+| Flag           | Default         | Description                      |
+| -------------- | --------------- | -------------------------------- |
+| `--channel`    | `TM3_CHANNEL`   | CAN interface                    |
+| `--interface`  | `TM3_INTERFACE` | python-can interface type        |
+| `--bitrate`    | `TM3_BITRATE`   | CAN bitrate (optional)           |
+| `--port`       | `8765`          | HTTP/WebSocket port              |
+| `--no-browser` | —               | Don't auto-open browser on start |
 
 **Features**
 
@@ -183,6 +235,31 @@ Opens `http://localhost:8765` automatically in your browser.
 **Signal decoding** handles little-endian and big-endian bit packing, multiplexed signals (`mux_id`), `value_description` enum mappings, and signed/unsigned scale+offset.
 
 ---
+
+## Configuration
+
+All tools read defaults from a `.env` file in the project root, so you don't have to repeat `--channel can0` on every command. Copy the example and edit:
+
+```
+cp .env.example .env
+```
+
+```sh
+# CAN interface
+TM3_CHANNEL=can0
+TM3_INTERFACE=socketcan
+# TM3_BITRATE=500000
+
+# Data files (defaults to data/ in the project root)
+# TM3_NODES_JSON=/path/to/nodes.json
+# TM3_ETH_COMPACT=/path/to/Model3_ETH.compact.json
+# TM3_ODJ_DIR=/path/to/odj
+
+# Firmware artifacts
+# TM3_ARTIFACTS_DIR=/path/to/seed_artifacts_v2
+```
+
+CLI flags always override `.env` values. `.env` is gitignored.
 
 ## Data files
 
@@ -198,7 +275,7 @@ Node configurations live in `data/`:
 pip install -r requirements.txt
 ```
 
-Requires Python 3.10+, `python-can`, `aiohttp`, and a SocketCAN interface (real or virtual via `vcan`). `can_live.py` also requires `aiohttp`.
+Requires Python 3.10+, `python-can`, `python-dotenv`, `aiohttp`, and a SocketCAN interface (real or virtual via `vcan`).
 
 ## Tests
 
