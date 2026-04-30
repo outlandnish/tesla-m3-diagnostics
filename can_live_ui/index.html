@@ -455,13 +455,15 @@ function handleFrame(msg) {
   const state = msgState.get(msg.msg_id);
   if (!state) return;
   state.lastTs = msg.timestamp;
+  const dom = msgDom.get(msg.msg_id);
+  const updatedPrefixes = new Set();
+
   msg.signals.forEach(s => {
     const cur = state.signals[s.signal];
     if (!cur) return;
     const changed = cur.value !== s.value || cur.label !== s.label;
     cur.value = s.value;
     cur.label = s.label || null;
-    const dom = msgDom.get(msg.msg_id);
     if (!dom) return;
     const row = dom.rows[s.signal];
     if (!row) return;
@@ -471,7 +473,23 @@ function handleFrame(msg) {
       if (changed) flashCell(row.valueTd);
     }
     row.labelTd.textContent = s.label || '';
+
+    const m = CHAR_RE.exec(s.signal);
+    if (m) updatedPrefixes.add(m[1]);
   });
+
+  if (dom) {
+    updatedPrefixes.forEach(prefix => {
+      const key = `__str__${prefix}`;
+      const row = dom.rows[key];
+      if (!row) return;
+      const str = assembleString(prefix, row.charGroup, state);
+      if (row.valueTd.textContent !== str) {
+        row.valueTd.textContent = str;
+        flashCell(row.valueTd);
+      }
+    });
+  }
 }
 
 function buildMsgSection(m) {
@@ -499,10 +517,28 @@ function buildMsgSection(m) {
 
   const table = document.createElement('table');
   const rows  = {};
+  const charGroups = charGroupsForMessage(m.signals);
+  const hiddenSigs = new Set();
+  charGroups.forEach(members => members.forEach(({ name }) => hiddenSigs.add(name)));
+
+  // Synthetic string rows first
+  charGroups.forEach((members, prefix) => {
+    const tr = document.createElement('tr');
+    tr.dataset.signal = `__str__${prefix}`;
+    const nameTd  = document.createElement('td'); nameTd.className  = 'sig-name';  nameTd.textContent  = prefix;
+    const valueTd = document.createElement('td'); valueTd.className = 'sig-value'; valueTd.textContent = '—';
+    valueTd.style.fontFamily = 'inherit';
+    const unitsTd = document.createElement('td'); unitsTd.className = 'sig-units';
+    const labelTd = document.createElement('td'); labelTd.className = 'sig-label';
+    tr.append(nameTd, valueTd, unitsTd, labelTd);
+    table.appendChild(tr);
+    rows[`__str__${prefix}`] = { tr, valueTd, labelTd, charGroup: members };
+  });
 
   m.signals.forEach(s => {
     const tr = document.createElement('tr');
     tr.dataset.signal = s.signal;
+    if (hiddenSigs.has(s.signal)) tr.style.display = 'none';
 
     const nameTd  = document.createElement('td'); nameTd.className  = 'sig-name';  nameTd.textContent  = s.signal;
     const valueTd = document.createElement('td'); valueTd.className = 'sig-value'; valueTd.textContent = '—';
@@ -516,7 +552,7 @@ function buildMsgSection(m) {
 
   section.appendChild(table);
   tableWrap.appendChild(section);
-  msgDom.set(m.id, { section, ageEl, rows });
+  msgDom.set(m.id, { section, ageEl, rows, charGroups });
 }
 
 setInterval(() => {
@@ -544,8 +580,16 @@ function applyFilter() {
   const q = filterInput.value.trim().toLowerCase();
   msgDom.forEach((dom) => {
     let msgVisible = false;
-    Object.entries(dom.rows).forEach(([sig, { tr }]) => {
-      const show = !q || sig.toLowerCase().includes(q);
+    Object.entries(dom.rows).forEach(([sig, { tr, charGroup }]) => {
+      const isStrRow = sig.startsWith('__str__');
+      const isCharRow = CHAR_RE.test(sig);
+      if (isCharRow) {
+        // always hidden — represented by the string row
+        tr.style.display = 'none';
+        return;
+      }
+      const label = isStrRow ? sig.replace('__str__', '') : sig;
+      const show = !q || label.toLowerCase().includes(q);
       tr.style.display = show ? '' : 'none';
       if (show) msgVisible = true;
     });
@@ -565,6 +609,33 @@ function selectNode(node) {
 
 function subscribe(node) {
   ws.send(JSON.stringify({ type: 'subscribe', node }));
+}
+
+const CHAR_RE = /^(.+)Char(\d+)$/;
+
+function charGroupsForMessage(signals) {
+  // Returns Map<prefix, sorted signal names>
+  const groups = new Map();
+  signals.forEach(s => {
+    const m = CHAR_RE.exec(s.signal || s);
+    if (!m) return;
+    const prefix = m[1];
+    if (!groups.has(prefix)) groups.set(prefix, []);
+    groups.get(prefix).push({ name: s.signal || s, idx: parseInt(m[2], 10) });
+  });
+  groups.forEach(arr => arr.sort((a, b) => a.idx - b.idx));
+  return groups;
+}
+
+function assembleString(prefix, signals, state) {
+  const chars = [];
+  for (const { name } of signals) {
+    const v = state.signals[name]?.value;
+    const code = typeof v === 'number' ? v : parseInt(v, 10);
+    if (!code) break; // null terminator
+    chars.push(String.fromCharCode(code));
+  }
+  return chars.join('') || '—';
 }
 
 function formatValue(v) {

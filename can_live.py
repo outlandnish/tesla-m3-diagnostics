@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import json
 import logging
+import threading
 import webbrowser
 from pathlib import Path
 
@@ -127,7 +128,7 @@ async def _can_reader(app: web.Application, bus: can.BusABC) -> None:
                 except Exception:
                     dead.add(ws)
 
-        app["clients"] -= dead
+        app["clients"].difference_update(dead)
 
 
 # ---------------------------------------------------------------------------
@@ -219,10 +220,13 @@ def main() -> None:
 
     url = f"http://localhost:{args.port}"
     if not args.no_browser:
-        asyncio.get_event_loop().call_later(0.5, webbrowser.open, url)
+        def _open_browser() -> None:
+            if not webbrowser.open(url):
+                log.info("Could not open browser automatically — visit %s", url)
+        threading.Timer(0.5, _open_browser).start()
 
     log.info("Serving on %s", url)
-    web.run_app(app, host="localhost", port=args.port, print=None)
+    web.run_app(app, host="0.0.0.0", port=args.port, print=None)
 
 
 if __name__ == "__main__":
