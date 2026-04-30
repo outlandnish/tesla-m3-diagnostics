@@ -230,8 +230,9 @@ def phase4_dry_run(artifacts_dir: Path, selected: list) -> None:
         ecu_type = entry.component.lower()
         try:
             script, module_byte = get_script(ecu_type)
-        except KeyError as exc:
-            _abort(str(exc))
+        except KeyError:
+            print(f"\n  {entry.dest_name}: no flash script for '{ecu_type}', skipping")
+            continue
 
         src = artifacts_dir / entry.src_path
         bhx_file = _parse_firmware(src)
@@ -265,8 +266,9 @@ def phase4_flash(
         ecu_type = entry.component.lower()
         try:
             script, module_byte = get_script(ecu_type)
-        except KeyError as exc:
-            _abort(str(exc))
+        except KeyError:
+            print(f"  Skipping {entry.dest_name}: no flash script for '{ecu_type}'")
+            continue
 
         src = artifacts_dir / entry.src_path
         bhx_file = _parse_firmware(src)
