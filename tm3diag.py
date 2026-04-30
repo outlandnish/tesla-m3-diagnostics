@@ -19,6 +19,7 @@ _DATA_DIR = _SCRIPT_DIR / "data"
 _NODES_JSON = _DATA_DIR / "nodes.json"
 _ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
 _ODJ_DIR = _DATA_DIR / "odj"
+_CACHE_FILE = _SCRIPT_DIR / ".tm3diag_cache"
 
 # Named routines from hashpicker_sim VM opcode table (UDS_VM_OPCODES.md).
 # Format: name → (routine_id, description, requires_security_access)
@@ -381,8 +382,23 @@ def _dfu_menu(sess, cfg, artifacts_dir: Path | None) -> None:
     _hdr(f"Firmware update (DFU) — {cfg.name}")
 
     if artifacts_dir is None:
-        artifacts_dir_str = input("  Path to seed_artifacts_v2: ").strip()
-        artifacts_dir = Path(artifacts_dir_str).expanduser().resolve()
+        cached = None
+        if _CACHE_FILE.exists():
+            try:
+                cached = Path(_CACHE_FILE.read_text().strip()).expanduser().resolve()
+                if not cached.is_dir():
+                    cached = None
+            except Exception:
+                cached = None
+        if cached:
+            print(f"  Using cached artifacts path: {cached}")
+            artifacts_dir = cached
+        else:
+            artifacts_dir_str = input("  Path to seed_artifacts_v2: ").strip()
+            artifacts_dir = Path(artifacts_dir_str).expanduser().resolve()
+
+    if artifacts_dir.is_dir():
+        _CACHE_FILE.write_text(str(artifacts_dir))
 
     if not artifacts_dir.is_dir():
         print(f"  Artifacts directory not found: {artifacts_dir}")

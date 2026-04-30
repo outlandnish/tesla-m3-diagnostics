@@ -7,3 +7,4 @@ venv/
 dist/
 build/
 seed_artifacts_v2/
+.tm3diag_cache
