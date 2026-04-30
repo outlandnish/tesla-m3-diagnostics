@@ -44,8 +44,9 @@ DEFAULTS: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 _hb_lock = threading.Lock()
-_hb_counter = 0           # VCFront counter 0-15
-_bms_mux = 0              # BMS heartbeat alternates between two frames
+_hb_counter = 0   # VCFront counter 0-15
+_bms_mux = False  # 0x3B2 alternates between two payloads
+_vcf_mux = False  # 0x545 alternates between two payloads
 
 # ---------------------------------------------------------------------------
 # Raw send helper
@@ -140,26 +141,34 @@ def evse_limit(current_a: float | None = None) -> None:
 
 
 def bms_heartbeat() -> None:
-    """Send one 0x3B2 BMS heartbeat frame (alternates between two mux states)."""
+    """Send one 0x3B2 BMS heartbeat frame (prevents bmsMia fault)."""
     global _bms_mux
     with _hb_lock:
         mux = _bms_mux
-        _bms_mux ^= 1
-    if mux == 0:
-        _send(0x3B2, [0x00, 0xF4, 0x01, 0x26, 0x00, 0x00, 0x00, 0x00])
+        _bms_mux = not mux
+    if mux:
+        _send(0x3B2, [0xE5, 0x0D, 0xEB, 0xFF, 0x0C, 0x66, 0xBB, 0x11])
     else:
-        _send(0x3B2, [0x01, 0xF4, 0x01, 0x26, 0x00, 0x00, 0x00, 0x00])
+        _send(0x3B2, [0xE3, 0x5D, 0xFB, 0xFF, 0x0C, 0x66, 0xBB, 0x06])
 
 
 def vcfront_heartbeat() -> None:
-    """Send one 0x545 VCFront heartbeat frame with rolling counter and checksum."""
-    global _hb_counter
+    """Send one 0x545 VCFront heartbeat frame (prevents vcfrontMia fault).
+
+    Alternates between two base payloads each call; counter in bits[7:4] of
+    byte 6 increments 0-15; byte 7 is CRC = sum(bytes[0:7]) + 0x45 + 0x05.
+    """
+    global _hb_counter, _vcf_mux
     with _hb_lock:
         ctr = _hb_counter
+        mux = _vcf_mux
         _hb_counter = (ctr + 1) & 0xF
-    payload = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, (ctr << 4) & 0xFF, 0x00]
-    checksum = (sum(payload[:7]) + 0x45 + 0x05) & 0xFF  # CAN ID 0x545
-    payload[7] = checksum
+        _vcf_mux = not mux
+    if mux:
+        payload = [0x14, 0x00, 0x3F, 0x70, 0x9F, 0x01, (ctr << 4) | 0x0A, 0x00]
+    else:
+        payload = [0x03, 0x19, 0x64, 0x32, 0x19, 0x00, (ctr << 4), 0x00]
+    payload[7] = (sum(payload[:7]) + 0x45 + 0x05) & 0xFF
     _send(0x545, payload)
 
 
@@ -213,17 +222,67 @@ def list_loops() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Background heartbeats (BMS @ 10ms, VCFront @ 50ms)
+# Background heartbeats — all 14 periodic messages the PCS expects
 # ---------------------------------------------------------------------------
 
 _hb_stop: threading.Event | None = None
 _hb_thread: threading.Thread | None = None
 
 
-def start_heartbeats() -> None:
-    """Start mandatory PCS keepalive heartbeats (BMS 10ms, VCFront 50ms).
+def _send_10ms() -> None:
+    """Messages sent every 10ms."""
+    v = int(DEFAULTS["hv_voltage"])
+    mode_nibble = 0x00  # off by default; use pcs_mode() to change
+    byte2 = ((v & 0xF) << 4) | mode_nibble
+    byte3 = (v >> 4) & 0xFF
+    _send(0x22A, [0x00, 0x00, byte2, byte3, 0x00, 0x00, 0x00, 0x00])
 
-    The PCS will fault with bmsMia / vcfrontMia if these are absent.
+    a = int(DEFAULTS["ac_limit"] * 2)
+    _send(0x13D, [0x0A, a, 0xAA, 0x1A, 0xFF, 0x02, 0x00, 0x00])  # charger off
+
+    bms_heartbeat()
+
+
+def _send_50ms() -> None:
+    """Messages sent every 50ms."""
+    vcfront_heartbeat()
+
+
+def _send_100ms() -> None:
+    """Messages sent every 100ms."""
+    # Static config frames
+    _send(0x20A, [0xF6, 0x15, 0x09, 0x82, 0x18, 0x01])
+    _send(0x212, [0xB9, 0x1C, 0x94, 0xAD, 0xC3, 0x15, 0x06, 0x63])
+    _send(0x232, [0x0A, 0x02, 0xD5, 0x09, 0xCB, 0x04, 0x00, 0x00])
+    _send(0x25D, [0xD9, 0x8C, 0x01, 0xB5, 0x4A, 0xC1, 0x0A, 0xE0])
+    _send(0x321, [0x2C, 0xB6, 0xA8, 0x7F, 0x02, 0x7F, 0x00, 0x00])
+
+    # uiMia keepalive
+    _send(0x333, [0x04, 0x30, 0x29, 0x07])
+
+    # EVSE limits
+    a = int(DEFAULTS["evse_limit"] * 2)
+    _send(0x21D, [0x2D, a, 0x00, 0x80, 0x00, 0x60, 0x10, 0x00])
+
+    # Redundant AC current limit
+    ac = int(DEFAULTS["ac_limit"] * 2)
+    _send(0x23D, [0x0A, ac, 0xFF, 0x0F])
+
+    # Charge power request (off)
+    w = int(DEFAULTS["charge_power"])
+    _send(0x2B2, [w & 0xFF, (w >> 8) & 0xFF, 0x00, 0x00, 0x00])
+
+    # DCDC voltage setpoint
+    v_raw = int(DEFAULTS["dcdc_voltage"] * 100)
+    _send(0x3A1, [0x09, 0x62, v_raw & 0xFF, ((v_raw >> 8) & 0x0F) | 0x90, 0x08, 0x2C, 0x12, 0x5A])
+
+
+def start_heartbeats() -> None:
+    """Start all periodic PCS keepalive messages.
+
+    10ms:  0x22A (mode), 0x13D (charger), 0x3B2 (bmsMia)
+    50ms:  0x545 (vcfrontMia)
+    100ms: 0x20A, 0x212, 0x21D, 0x232, 0x23D, 0x25D, 0x2B2, 0x321, 0x333 (uiMia), 0x3A1
     """
     global _hb_stop, _hb_thread
     if _hb_thread and _hb_thread.is_alive():
@@ -233,22 +292,27 @@ def start_heartbeats() -> None:
     _hb_stop = threading.Event()
 
     def _run() -> None:
-        vcfront_counter = 0
+        tick = 0  # counts 10ms ticks
+        # Send initial burst so PCS doesn't timeout during startup
+        _send_10ms()
+        _send_50ms()
+        _send_100ms()
         while not _hb_stop.is_set():
-            bms_heartbeat()
-            vcfront_counter += 1
-            if vcfront_counter >= 5:  # every 5×10ms = 50ms
-                vcfront_heartbeat()
-                vcfront_counter = 0
             _hb_stop.wait(0.010)
+            tick += 1
+            _send_10ms()
+            if tick % 5 == 0:
+                _send_50ms()
+            if tick % 10 == 0:
+                _send_100ms()
 
     _hb_thread = threading.Thread(target=_run, daemon=True, name="pcs-heartbeat")
     _hb_thread.start()
-    print("Heartbeats started (BMS@10ms, VCFront@50ms)")
+    print("Heartbeats started (10ms/50ms/100ms groups, 14 messages total)")
 
 
 def stop_heartbeats() -> None:
-    """Stop the background heartbeat thread."""
+    """Stop all background heartbeat messages."""
     if _hb_stop:
         _hb_stop.set()
     print("Heartbeats stopped")
