@@ -210,9 +210,20 @@ def phase3_preflight(
             )
 
 
+def _parse_firmware(src: Path):
+    """Parse a firmware file into a bhx-compatible object based on extension."""
+    import bhx
+    import ihex
+    ext = src.suffix.lower()
+    if ext == ".bhx":
+        return bhx.parse_file(src)
+    if ext in (".hex", ".img"):
+        return ihex.parse_file(src)
+    raise ValueError(f"Unsupported firmware file type: {src.suffix!r}")
+
+
 def phase4_dry_run(artifacts_dir: Path, selected: list) -> None:
     """Print what would be flashed without sending any UDS frames."""
-    import bhx
     _print_section("Phase 4: Dry Run — Flash Plan")
 
     for entry in selected:
@@ -223,7 +234,7 @@ def phase4_dry_run(artifacts_dir: Path, selected: list) -> None:
             _abort(str(exc))
 
         src = artifacts_dir / entry.src_path
-        bhx_file = bhx.parse_file(src)
+        bhx_file = _parse_firmware(src)
 
         step_names = [s.__name__ for s in script.steps]
         print(f"\n  {entry.dest_name}  ({entry.src_path})")
@@ -248,8 +259,6 @@ def phase4_flash(
     selected: list,
 ) -> None:
     """Execute the flash sequence for each selected firmware entry."""
-    import bhx
-
     for fw_index, entry in enumerate(selected):
         _print_section(f"Phase 4: Flash — {entry.dest_name}")
 
@@ -260,7 +269,7 @@ def phase4_flash(
             _abort(str(exc))
 
         src = artifacts_dir / entry.src_path
-        bhx_file = bhx.parse_file(src)
+        bhx_file = _parse_firmware(src)
 
         print(f"  Script: {script}  module=0x{module_byte:02X}")
         print("  Starting TesterPresent keepalive...")
