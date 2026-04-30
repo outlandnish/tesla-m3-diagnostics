@@ -93,6 +93,7 @@ def step_board_info(sess: "UdsSession", ctx: FlashContext) -> None:
 def step_programming_session(sess: "UdsSession", ctx: FlashContext) -> None:
     print("  Step: DiagnosticSessionControl(PROGRAMMING)")
     sess.diagnostic_session(0x02)
+    sess.sleep(0.5)  # ECU reboots into bootloader after programming session
 
 
 def step_verify_comp_fw(sess: "UdsSession", ctx: FlashContext) -> None:

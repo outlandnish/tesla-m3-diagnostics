@@ -272,17 +272,26 @@ class UdsSession:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _send_raw(self, payload: list[int]) -> list[int]:
+    def _send_raw(self, payload: list[int], timeout_ms: float = 2000) -> list[int]:
         msg = UdsMessage(
             payload=bytearray(payload),
             addressing_type=AddressingType.PHYSICAL,
         )
         self._transport.send_message(msg)
-        try:
-            record = self._transport.receive_message(start_timeout=1000, end_timeout=1000)
-            return list(record.payload)
-        except Exception:
-            return []
+        deadline_ms = timeout_ms
+        while True:
+            try:
+                record = self._transport.receive_message(
+                    start_timeout=deadline_ms, end_timeout=deadline_ms
+                )
+            except Exception:
+                return []
+            resp = list(record.payload)
+            # 0x78 = requestCorrectlyReceivedResponsePending — ECU still working
+            if len(resp) >= 3 and resp[0] == 0x7F and resp[2] == 0x78:
+                deadline_ms = timeout_ms
+                continue
+            return resp
 
     @staticmethod
     def _check_positive(resp: list[int], expected_sid: int) -> None:
