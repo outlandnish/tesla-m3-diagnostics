@@ -6,8 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-_DATA_DIR = Path(__file__).parent / "data"
-_ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
+import config as _cfg
+
+_ETH_COMPACT = _cfg.ETH_COMPACT
 
 
 def _extract_bits_little(data: bytes, start_bit: int, width: int) -> int:

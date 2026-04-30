@@ -115,9 +115,9 @@ def step_verify_comp_fw(sess: "UdsSession", ctx: FlashContext) -> None:
         from uds_local.client import UdsError
         raise UdsError(0x22, 0x00)
     print(
-        f"    component_key=0x{comp_fw[0]:02X}"
-        f"  fw_type=0x{comp_fw[1]:02X}"
-        f"  protocol_ver=0x{comp_fw[2]:02X}"
+        f"    protocol_ver=0x{comp_fw[0]:02X}"
+        f"  component_key=0x{comp_fw[1]:02X}"
+        f"  fw_type=0x{comp_fw[2]:02X}"
     )
 
 

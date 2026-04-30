@@ -13,6 +13,8 @@ import argparse
 import asyncio
 import json
 import logging
+
+import config as _cfg
 import threading
 import webbrowser
 from pathlib import Path
@@ -200,9 +202,10 @@ def _build_app(bus: can.BusABC) -> web.Application:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Live CAN signal viewer")
-    parser.add_argument("--channel", default="vcan0", help="CAN channel (default: vcan0)")
-    parser.add_argument("--interface", default="socketcan", help="python-can interface (default: socketcan)")
+    parser.add_argument("--channel", help="CAN channel")
+    parser.add_argument("--interface", help="python-can interface")
     parser.add_argument("--bitrate", type=int, default=None, help="CAN bitrate (optional)")
+    _cfg.apply_defaults(parser)
     parser.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
     parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     args = parser.parse_args()

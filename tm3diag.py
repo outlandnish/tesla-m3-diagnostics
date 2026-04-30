@@ -14,12 +14,12 @@ import readline
 from pathlib import Path
 from typing import Any
 
-_SCRIPT_DIR = Path(__file__).parent
-_DATA_DIR = _SCRIPT_DIR / "data"
-_NODES_JSON = _DATA_DIR / "nodes.json"
-_ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
-_ODJ_DIR = _DATA_DIR / "odj"
-_CACHE_FILE = _SCRIPT_DIR / ".tm3diag_cache"
+import config as _cfg
+
+_NODES_JSON  = _cfg.NODES_JSON
+_ETH_COMPACT = _cfg.ETH_COMPACT
+_ODJ_DIR     = _cfg.ODJ_DIR
+_CACHE_FILE  = Path(__file__).parent / ".tm3diag_cache"
 
 # Named routines from hashpicker_sim VM opcode table (UDS_VM_OPCODES.md).
 # Format: name → (routine_id, description, requires_security_access)
@@ -547,9 +547,10 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="Interactive Tesla Model 3 ECU diagnostic terminal")
     parser.add_argument("--node", "-n", help="ECU node name (e.g. PCS, CP). Prompts if omitted.")
-    parser.add_argument("--channel", "-c", default="vcan0", help="CAN interface (default: vcan0)")
-    parser.add_argument("--interface", "-i", default="socketcan", help="python-can interface type")
+    parser.add_argument("--channel", "-c", help="CAN interface channel")
+    parser.add_argument("--interface", "-i", help="python-can interface type")
     parser.add_argument("--artifacts", "-a", help="Path to seed_artifacts_v2 (for DFU)")
+    _cfg.apply_defaults(parser)
     args = parser.parse_args()
 
     nodes = json.loads(_NODES_JSON.read_text())

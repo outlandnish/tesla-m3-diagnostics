@@ -20,17 +20,17 @@ _SESSION_DEFAULT = 0x01
 _SESSION_PROGRAMMING = 0x02
 _SESSION_EXTENDED = 0x03
 
-_SID_DSC  = 0x10  # DiagnosticSessionControl
-_SID_SA   = 0x27  # SecurityAccess
+_SID_DSC = 0x10  # DiagnosticSessionControl
+_SID_SA = 0x27  # SecurityAccess
 _SID_RDBI = 0x22  # ReadDataByIdentifier
 _SID_WDBI = 0x2E  # WriteDataByIdentifier
-_SID_RC   = 0x31  # RoutineControl
-_SID_RD   = 0x34  # RequestDownload
-_SID_TD   = 0x36  # TransferData
-_SID_RTE  = 0x37  # RequestTransferExit
-_SID_ER   = 0x11  # ECUReset
-_SID_TP   = 0x3E  # TesterPresent
-_SID_CDI  = 0x14  # ClearDiagnosticInformation
+_SID_RC = 0x31  # RoutineControl
+_SID_RD = 0x34  # RequestDownload
+_SID_TD = 0x36  # TransferData
+_SID_RTE = 0x37  # RequestTransferExit
+_SID_ER = 0x11  # ECUReset
+_SID_TP = 0x3E  # TesterPresent
+_SID_CDI = 0x14  # ClearDiagnosticInformation
 
 _RC_START = 0x01
 

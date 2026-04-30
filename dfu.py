@@ -12,14 +12,13 @@ import argparse
 import sys
 from pathlib import Path
 
+import config as _cfg
 from flash_scripts import get_script
 from uds_local.client import UdsSession
 
-_SCRIPT_DIR = Path(__file__).parent
-_DATA_DIR = _SCRIPT_DIR / "data"
-_NODES_JSON = _DATA_DIR / "nodes.json"
-_ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
-_ODJ_DIR = _DATA_DIR / "odj"
+_NODES_JSON  = _cfg.NODES_JSON
+_ETH_COMPACT = _cfg.ETH_COMPACT
+_ODJ_DIR     = _cfg.ODJ_DIR
 
 _DID_BOOTLOADER_VERSION = 0xF180
 
@@ -307,14 +306,15 @@ def main() -> int:
     )
     parser.add_argument("--node", "-n", required=True,
                         help="ECU node name (e.g. PCS)")
-    parser.add_argument("--channel", "-c", default="vcan0",
-                        help="CAN interface (default: vcan0)")
-    parser.add_argument("--interface", "-i", default="socketcan",
+    parser.add_argument("--channel", "-c",
+                        help="CAN interface channel")
+    parser.add_argument("--interface", "-i",
                         help="python-can interface type")
     parser.add_argument(
-        "--artifacts", "-a", required=True,
+        "--artifacts", "-a",
         help="Path to seed_artifacts_v2 directory",
     )
+    _cfg.apply_defaults(parser)
     parser.add_argument("--force", action="store_true",
                         help="Skip pre-flight identity mismatch abort")
     parser.add_argument("--dry-run", action="store_true",
@@ -332,6 +332,9 @@ def main() -> int:
 
     if args.packed_key is not None and not args.dry_run:
         parser.error("--packed-key requires --dry-run")
+
+    if not args.artifacts:
+        parser.error("--artifacts is required (or set TM3_ARTIFACTS_DIR in .env)")
 
     artifacts_dir = Path(args.artifacts).expanduser().resolve()
     if not artifacts_dir.is_dir():

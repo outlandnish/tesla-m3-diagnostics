@@ -16,13 +16,12 @@ from __future__ import annotations
 
 import argparse
 import sys
-from pathlib import Path
 
-_SCRIPT_DIR = Path(__file__).parent
-_DATA_DIR = _SCRIPT_DIR / "data"
-_NODES_JSON = _DATA_DIR / "nodes.json"
-_ETH_COMPACT = _DATA_DIR / "Model3_ETH.compact.json"
-_ODJ_DIR = _DATA_DIR / "odj"
+import config as _cfg
+
+_NODES_JSON  = _cfg.NODES_JSON
+_ETH_COMPACT = _cfg.ETH_COMPACT
+_ODJ_DIR     = _cfg.ODJ_DIR
 
 
 def _load_config(node_name: str):
@@ -160,11 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--channel", "-c", default="vcan0",
-        help="CAN interface (default: vcan0)")
+        "--channel", "-c",
+        help="CAN interface channel")
     parser.add_argument(
-        "--interface", "-i", default="socketcan",
+        "--interface", "-i",
         help="python-can interface type")
+    _cfg.apply_defaults(parser)
 
     parent_node = argparse.ArgumentParser(add_help=False)
     parent_node.add_argument(
