@@ -60,7 +60,16 @@ def _apply_scale(raw: int, sig: dict[str, Any]) -> float:
     return raw * scale + offset
 
 
-def decode_signal(data: bytes, sig: dict[str, Any]) -> tuple[float | int, str | None]:
+def _is_hex_signal(sig: dict[str, Any], name: str) -> bool:
+    lower = name.lower()
+    return sig.get("width", 0) % 8 == 0 and ("hash" in lower or "crc" in lower)
+
+
+def _int_to_hex(value: int, width_bits: int) -> str:
+    return value.to_bytes(width_bits // 8, "little").hex()
+
+
+def decode_signal(data: bytes, sig: dict[str, Any], name: str = "") -> tuple[float | int, str | None]:
     """Return (physical_value, enum_label_or_None) for a signal."""
     start = sig["start_position"]
     width = sig["width"]
@@ -72,6 +81,9 @@ def decode_signal(data: bytes, sig: dict[str, Any]) -> tuple[float | int, str | 
         raw = _extract_bits_big(data, start, width)
 
     phys = _apply_scale(raw, sig)
+
+    if _is_hex_signal(sig, name):
+        return phys, _int_to_hex(raw, width)
 
     label: str | None = None
     vd = sig.get("value_description")
@@ -139,7 +151,7 @@ class CanDatabase:
             if len(data) * 8 < sig["start_position"] + sig["width"]:
                 continue  # frame too short
 
-            phys, label = decode_signal(data, sig)
+            phys, label = decode_signal(data, sig, sname)
             results.append(
                 {
                     "signal": sname,

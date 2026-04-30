@@ -467,12 +467,12 @@ function handleFrame(msg) {
     if (!dom) return;
     const row = dom.rows[s.signal];
     if (!row) return;
-    const formatted = formatValue(s.value, s.units);
+    const formatted = (s.label && !s.units) ? s.label : formatValue(s.value, s.units);
     if (row.valueTd.textContent !== formatted) {
       row.valueTd.textContent = formatted;
       if (changed) flashCell(row.valueTd);
     }
-    row.labelTd.textContent = s.label || '';
+    row.labelTd.textContent = (s.label && !s.units) ? '' : (s.label || '');
 
     const m = CHAR_RE.exec(s.signal);
     if (m) updatedPrefixes.add(m[1]);
