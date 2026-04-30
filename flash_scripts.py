@@ -127,15 +127,18 @@ def step_security_access(sess: "UdsSession", ctx: FlashContext) -> None:
 
 
 def step_module_to_program(sess: "UdsSession", ctx: FlashContext) -> None:
-    """WDBI 0x0102 — select CPU/flash region."""
+    """Set extended timeout then select CPU/flash region (WDBI 0x0102).
+
+    netSetTimeout must precede moduleToProgram per the flash protocol.
+    """
     print(f"  Step: moduleToProgram (module=0x{ctx.module_byte:02X})")
+    sess.set_timeout(ctx.erase_timeout)
     sess.module_to_program(ctx.module_byte)
 
 
 def step_erase(sess: "UdsSession", ctx: FlashContext) -> None:
-    """RC 0xFF00 initializeEraseModule with extended timeout."""
+    """RC 0xFF00 initializeEraseModule (timeout already set by step_module_to_program)."""
     print(f"  Step: RC 0xFF00 initializeEraseModule (P2={ctx.erase_timeout}s)")
-    sess.set_timeout(ctx.erase_timeout)
     sess.start_tester_present()
     try:
         sess.routine_control(_RC_ERASE, b"\x01")
