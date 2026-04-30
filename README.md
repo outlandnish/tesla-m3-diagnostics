@@ -19,11 +19,11 @@ python tm3diag.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2
 
 **Options**
 
-| Flag                | Default     | Description                                                       |
-| ------------------- | ----------- | ----------------------------------------------------------------- |
-| `--node`, `-n`      | —           | ECU node name. Opens pre-connection menu if omitted.              |
-| `--channel`, `-c`   | `TM3_CHANNEL`   | CAN interface                                                     |
-| `--interface`, `-i` | `TM3_INTERFACE` | python-can interface type                                         |
+| Flag                | Default             | Description                                                       |
+| ------------------- | ------------------- | ----------------------------------------------------------------- |
+| `--node`, `-n`      | —                   | ECU node name. Opens pre-connection menu if omitted.              |
+| `--channel`, `-c`   | `TM3_CHANNEL`       | CAN interface                                                     |
+| `--interface`, `-i` | `TM3_INTERFACE`     | python-can interface type                                         |
 | `--artifacts`, `-a` | `TM3_ARTIFACTS_DIR` | Path to `seed_artifacts_v2` (needed for DFU; prompted if missing) |
 
 **Pre-connection commands** (shown when `--node` is omitted)
@@ -92,8 +92,8 @@ python tm3uds.py --node PCS --channel vcan0 reset
 
 **Options**
 
-| Flag                | Default     | Description                             |
-| ------------------- | ----------- | --------------------------------------- |
+| Flag                | Default         | Description                             |
+| ------------------- | --------------- | --------------------------------------- |
 | `--node`, `-n`      | —               | ECU node name (e.g. `PCS`, `CP`, `RCM`) |
 | `--channel`, `-c`   | `TM3_CHANNEL`   | CAN interface                           |
 | `--interface`, `-i` | `TM3_INTERFACE` | python-can interface type               |
@@ -111,8 +111,8 @@ python dfu.py --node PCS --channel vcan0 --artifacts ~/seed_artifacts_v2 --force
 
 **Options**
 
-| Flag                | Default     | Description                             |
-| ------------------- | ----------- | --------------------------------------- |
+| Flag                | Default             | Description                             |
+| ------------------- | ------------------- | --------------------------------------- |
 | `--node`, `-n`      | —                   | ECU node name                           |
 | `--channel`, `-c`   | `TM3_CHANNEL`       | CAN interface                           |
 | `--interface`, `-i` | `TM3_INTERFACE`     | python-can interface type               |
@@ -169,24 +169,23 @@ python pcs_send.py --channel can0
 
 **Available functions**
 
-| Function | Frame | Description |
-| --- | --- | --- |
-| `pcs_mode(mode, hv_voltage)` | `0x22A` | Set PCS mode: `'off'`, `'charge'`, `'dcdc'`, `'both'` |
-| `charger_enable(current_a)` | `0x13D` | Enable charger with AC current limit |
-| `charger_disable()` | `0x13D` | Disable charger |
-| `charge_power(watts, on)` | `0x2B2` | Charge power request in watts |
-| `dcdc_voltage(volts)` | `0x3A1` | DCDC output voltage setpoint |
-| `evse_limit(current_a)` | `0x21D` | EVSE current limit |
-| `bms_heartbeat()` | `0x3B2` | One BMS keepalive frame |
-| `vcfront_heartbeat()` | `0x545` | One VCFront keepalive frame (with counter + checksum) |
-| `raw(can_id, data)` | any | Send an arbitrary frame |
-| `start_heartbeats()` | — | Background BMS@10ms + VCFront@50ms keepalives |
-| `stop_heartbeats()` | — | Stop background heartbeats |
-| `start_listener(node)` | — | Print decoded incoming frames to terminal (default: `'PCS'`) |
-| `stop_listener()` | — | Stop listener |
-| `send_loop(name, fn, interval_ms)` | — | Repeat any callable at a fixed interval |
-| `stop_loop(name)` | — | Stop a named loop |
-| `list_loops()` | — | Show active loops |
+| Function                           | Frame   | Description                                                  |
+| ---------------------------------- | ------- | ------------------------------------------------------------ | ------------ | --- | ----------------------- |
+| `pcs_mode(mode, hv_voltage)`       | `0x22A` | Set PCS mode: `'off'`, `'charge'`, `'dcdc'`, `'both'`        |
+| `charger_enable(current_a)`        | `0x13D` | Enable charger with AC current limit                         |
+| `charger_disable()`                | `0x13D` | Disable charger                                              |
+| `charge_power(watts, on)`          | `0x2B2` | Charge power request in watts                                |
+| `dcdc_voltage(volts)`              | `0x3A1` | DCDC output voltage setpoint                                 |
+| `evse_limit(current_a)`            | `0x21D` | EVSE current limit                                           |
+| `bms_heartbeat()`                  | `0x3B2` | One BMS keepalive frame                                      |
+| `vcfront_heartbeat()`              | `0x545` | One VCFront keepalive frame (with counter + checksum)        | \_id, data)` | any | Send an arbitrary frame |
+| `start_heartbeats()`               | —       | Background BMS@10ms + VCFront@50ms keepalives                |
+| `stop_heartbeats()`                | —       | Stop background heartbeats                                   |
+| `start_listener(node)`             | —       | Print decoded incoming frames to terminal (default: `'PCS'`) |
+| `stop_listener()`                  | —       | Stop listener                                                |
+| `send_loop(name, fn, interval_ms)` | —       | Repeat any callable at a fixed interval                      |
+| `stop_loop(name)`                  | —       | Stop a named loop                                            |
+| `list_loops()`                     | —       | Show active loops                                            |
 
 **`DEFAULTS` dict** — tune once, all helpers pick it up:
 
@@ -199,6 +198,27 @@ DEFAULTS['evse_limit']   = 32     # A
 ```
 
 The PCS requires `0x3B2` (BMS) and `0x545` (VCFront) heartbeats at fixed rates or it raises `bmsMia`/`vcfrontMia` faults. Call `start_heartbeats()` before sending any control frames.
+
+---
+
+### `compact_to_dbc.py` — Convert compact JSON to DBC
+
+Converts `Model3_ETH.compact.json` to a standard DBC file for use in tools like CANdb++, Vector CANalyzer, Cangaroo, or SavvyCAN.
+
+```
+python compact_to_dbc.py                          # data/Model3_ETH.compact.json -> Model3_ETH.dbc
+python compact_to_dbc.py input.json output.dbc
+```
+
+The output DBC includes:
+
+- All messages (`BO_`) with correct ID, length, and sender
+- All signals (`SG_`) with start bit, width, byte order, sign, scale, offset, min/max, units, and receivers
+- Multiplexed signals — muxer (`M`) and muxed (`mN`) indicators
+- Value descriptions (`VAL_`) for enum signals
+- Cycle-time attributes (`BA_ "GenMsgCycleTime"`) for periodic messages
+
+Both little-endian (Intel) and big-endian (Motorola) signals are handled correctly.
 
 ---
 
