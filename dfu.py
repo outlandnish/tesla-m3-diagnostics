@@ -16,8 +16,10 @@ import config as _cfg
 from flash_scripts import (
     find_bootloader_entries,
     find_dual_cpu_pair,
+    find_subcomponent_entries,
     get_script,
     parent_node_for_bootloader,
+    parent_node_for_subcomponent,
     run_pcs_dual_cpu,
 )
 from uds_local.client import UdsSession
@@ -129,6 +131,7 @@ def phase2_firmware_selection(
                     _abort(f"Invalid selection: {raw!r}")
 
     selected = _prompt_bootloader_choice(selected, node_name)
+    selected = _prompt_subcomponent_choice(selected, node_name)
     selected = _prompt_dual_cpu_choice(selected)
 
     for e in selected:
@@ -187,6 +190,57 @@ def _prompt_bootloader_choice(selected: list, node_name: str) -> list:
             print("  → Including bootloader files (bu → bl → app).")
             # Order: bu first, bl second, then everything else.
             return bus + bls + apps
+        print(f"  Invalid choice: {raw!r}")
+
+
+def _prompt_subcomponent_choice(selected: list, node_name: str) -> list:
+    """If `selected` includes subcomponent entries, ask whether to flash them.
+
+    Subcomponents (e.g. cpPlcFw, cpPlcPib for CP) are firmware blobs flashed
+    via the parent ECU's UDS endpoint — the parent's bootloader receives them
+    and routes the contents to the subcomponent over an internal interconnect.
+    They're co-versioned with the parent app (same lookup key in the TSV), so
+    the default is **include** — skipping them after a parent-app update can
+    leave the subcomponent on a mismatched firmware revision.
+    """
+    subs, others = find_subcomponent_entries(selected)
+    if not subs:
+        return selected
+
+    parents = sorted({parent_node_for_subcomponent(e.component) or "?" for e in subs})
+
+    print("\n  Subcomponents detected for this firmware package:")
+    for e in subs:
+        parent = parent_node_for_subcomponent(e.component) or "?"
+        print(
+            f"    [{e.component}] {e.dest_name}"
+            f"  (flashed via parent: {parent})"
+        )
+
+    print()
+    print("  Subcomponents are co-versioned with the parent app (same lookup")
+    print("  key). Skipping them after flashing the parent app will leave the")
+    print("  subcomponent on the previous firmware revision and may cause")
+    print("  feature regressions (e.g. PLC charging negotiation for CP).")
+
+    # Sanity warning if the user's --node arg doesn't match a subcomponent's parent
+    parents_lower = {p.lower() for p in parents}
+    if node_name.lower() not in parents_lower:
+        print(
+            f"  Warning: --node {node_name} but subcomponents expect parent(s)"
+            f" {sorted(parents)}"
+        )
+
+    while True:
+        raw = input("  Include subcomponents? [Y/n]: ").strip().lower() or "y"
+        if raw in ("y", "yes"):
+            print("  → Including subcomponents (flashed after parent app, in TSV order).")
+            # Order: parent app(s) first, then subcomponents — TSV order.
+            # `selected` may already have them interleaved; preserve original order.
+            return selected
+        if raw in ("n", "no"):
+            print("  → Skipping subcomponents.")
+            return others
         print(f"  Invalid choice: {raw!r}")
 
 

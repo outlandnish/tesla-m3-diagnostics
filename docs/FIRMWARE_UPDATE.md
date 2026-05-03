@@ -655,6 +655,76 @@ needed for the bootloader endpoints.
 
 ---
 
+## Subcomponent flashes (CP PLC modem)
+
+Some ECUs include a secondary chip that's flashed *through* the main MCU's UDS
+endpoint. The CP (charge port) MCU has a PLC modem (Powerline Communication
+chip) on board, used for high-bandwidth communication during charging. The PLC
+modem doesn't have its own CAN connection — its firmware is delivered to the
+CP MCU via the regular UDS flash flow, and the CP MCU's bootloader forwards
+the data over an internal interconnect (SPI or UART) based on the embedded
+file addresses.
+
+### TSV layout for CP
+
+```
+cp:201392129  cp/14/CP_..._CRC.bhx              cp.bhx          cp          ...
+cp:201392129  cp/14/cpPlcFw_1.2.5-BE0A291A.hex  cpPlcFw.hex     cpPlcFw     ...
+cp:201392129  cp/14/cpPlcPib-98FA4A87.hex       cpPlcPib.hex    cpPlcPib    ...
+```
+
+All three rows share the same `cp:<key>` lookup. Older CP variants (≤ 13)
+ship only `cp.bhx`; the PLC modem firmware was added at variant 14.
+
+### Flash properties
+
+| ecu_type    | Script | Module byte | File format | Target              |
+| ----------- | ------ | ----------- | ----------- | ------------------- |
+| `cp`        | `0x00650fb0` (Standard) | `0x05` | BHX | CP MCU app slot |
+| `cpPlcFw`   | `0x00650fb0` (Standard) | `0x05` | Intel HEX | PLC modem firmware |
+| `cpPlcPib`  | `0x00650fb0` (Standard) | `0x05` | Intel HEX | PLC modem PIB (config) |
+
+All three use the **same script**, **same module byte**, and the **same UDS
+CAN IDs** (`UDS_cpRequest` / `CP_udsResponse`). The CP MCU bootloader
+distinguishes them by the address ranges in the transferred records — the
+HEX files target memory regions on the PLC modem die, not the CP MCU's flash.
+
+`fw_type` returned by DID `0x0101` during `varifyCompAndFirmwareType` is `1`
+in all three cases — the bootloader doesn't differentiate the file's eventual
+destination at the verify-type level.
+
+### Order
+
+TSV order is authoritative: **`cp` (main app) first**, then `cpPlcFw`, then
+`cpPlcPib`. Each runs through its own complete prog-0 sequence (reset →
+session → auth → moduleToProgram → erase → transfer → verify → reset). The
+CP MCU must be running its new app before it can hand off PLC firmware over
+the internal interconnect — flashing the PLC firmware first against an old
+CP MCU app may fail or write to the wrong region.
+
+### What's at node-table offset `+0x24`?
+
+The CP, cpPlcFw, and cpPlcPib node-table entries differ at offset `+0x24`
+(values `0`, `8`, `6` respectively) — likely an internal subcomponent
+identifier used by the binary's flash-orchestration display logic, not by
+the wire protocol. The values don't appear in any UDS frame the tool sends.
+Treat as informational; the per-file destination is encoded entirely by the
+HEX record addresses.
+
+### Implementation note
+
+A flash tool with `cp`, `cpPlcFw`, `cpPlcPib` mapped to the standard script
+flow (module `0x05`) and the same `UdsSession` works for all three —
+`bhx.parse_file` for the `.bhx`, `ihex.parse_file` for the `.hex`, both
+producing a `Segment(start_address, data)` interface that `RequestDownload`
+uses verbatim.
+
+This pattern is **only used by CP** in the seed artifacts surveyed — no
+other ECU in the TSV has subcomponent files with the `<parent><suffix>`
+naming convention.
+
+---
+
 ## Frame-by-Frame Reference
 
 ### 0. ECUReset and Bootloader Handover (before session)

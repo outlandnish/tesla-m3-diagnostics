@@ -886,17 +886,30 @@ ECU_SCRIPT_MAP: dict[str, _Entry] = {
     "gtw3": (SCRIPT_GTW3, 0x00),
 
     # Standard script (0x00650fb0)
-    "hvbms":  (SCRIPT_STANDARD, 0x00),
-    "cp":     (SCRIPT_STANDARD, 0x00),
-    "epas3p": (SCRIPT_STANDARD, 0x00),
-    "epas3s": (SCRIPT_STANDARD, 0x00),
-    "epbl":   (SCRIPT_STANDARD, 0x00),
-    "epbr":   (SCRIPT_STANDARD, 0x00),
-    "hvp":    (SCRIPT_STANDARD, 0x00),
-    "ocs1p":  (SCRIPT_STANDARD, 0x00),
-    "sccmk":  (SCRIPT_STANDARD, 0x00),
-    "vcsec":  (SCRIPT_STANDARD, 0x00),
-    "tas":    (SCRIPT_STANDARD, 0x00),
+    # NOTE: module bytes here are from the binary's node table at +0x20.
+    # Earlier versions of this map had `0x00` for all of these, which works
+    # only because most single-CPU bootloaders ignore the operand. The
+    # binary's authoritative values are below.
+    "hvbms":  (SCRIPT_STANDARD, 0x02),
+    "cp":     (SCRIPT_STANDARD, 0x05),
+    "epas3p": (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "epas3s": (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "epbl":   (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "epbr":   (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "hvp":    (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "ocs1p":  (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "sccmk":  (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "vcsec":  (SCRIPT_STANDARD, 0x1B),
+    "tas":    (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+
+    # CP PLC modem subcomponents — flashed via the CP MCU's bootloader using the
+    # same SCRIPT_STANDARD as the regular CP app. Module byte is 0x05 (CP MCU);
+    # the CP MCU's bootloader routes the .hex file contents to the PLC modem
+    # over its internal interconnect based on each record's address range.
+    # `cpPlcFw` is the modem firmware, `cpPlcPib` is the modem PIB
+    # (Personality Identifier Block — modem config).
+    "cpplcfw":  (SCRIPT_STANDARD, 0x05),
+    "cpplcpib": (SCRIPT_STANDARD, 0x05),
 
     # vcfront / ibstcal (0x00651000)
     "vcfront": (SCRIPT_VCFRONT, 0x00),
@@ -1029,6 +1042,42 @@ def find_bootloader_entries(selected: list) -> tuple[list, list, list]:
         else:
             apps.append(e)
     return bus, bls, apps
+
+
+# ECU subcomponents that are flashed alongside their parent app via the parent's
+# UDS endpoint (parent MCU bootloader routes the file contents to the
+# subcomponent based on address ranges). Maps subcomponent ecu_type → parent.
+# The CP MCU's bootloader handles cpPlcFw (PLC modem firmware) and cpPlcPib
+# (PLC modem Personality Identifier Block) over its internal interconnect.
+_SUBCOMPONENT_PARENT: dict[str, str] = {
+    "cpplcfw":  "cp",
+    "cpplcpib": "cp",
+}
+
+
+def is_subcomponent_ecu_type(ecu_type: str) -> bool:
+    """True if ecu_type names a subcomponent flashed via a parent ECU."""
+    return ecu_type.lower() in _SUBCOMPONENT_PARENT
+
+
+def parent_node_for_subcomponent(ecu_type: str) -> str | None:
+    """Return the parent ECU node name for a subcomponent ecu_type, or None."""
+    return _SUBCOMPONENT_PARENT.get(ecu_type.lower())
+
+
+def find_subcomponent_entries(selected: list) -> tuple[list, list]:
+    """Split `selected` into (subcomponent_entries, other_entries).
+
+    Subcomponents are entries whose ecu_type is in `_SUBCOMPONENT_PARENT` (e.g.
+    `cpPlcFw`, `cpPlcPib`). Order within each list preserves input order.
+    """
+    subs, others = [], []
+    for e in selected:
+        if e.component.lower() in _SUBCOMPONENT_PARENT:
+            subs.append(e)
+        else:
+            others.append(e)
+    return subs, others
 
 
 def get_script(ecu_type: str) -> _Entry:
