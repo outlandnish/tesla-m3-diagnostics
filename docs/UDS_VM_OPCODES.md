@@ -102,15 +102,18 @@ Subroutine N is at `PTR_DAT_00650ba0[N]` (8 bytes per entry).
 | 1 | `0x00650b98` | `05 00 09 00 0A 00 2C 00` → `moduleToProgram(0)`, `initializeEraseModule(0)`, `transferData(0)`, RET — **full programming session + erase + download** |
 | 2 | `0x00651388` | `03 03 02 00 18 00 19 01 2C 00` → `setSecurityAccessLevel(3)`, `securityAccess(0)`, `VCWaitForOTAMode(0)`, `IbstPowerControl(1)`, RET |
 | 3 | `0x00651398` | `03 03 02 00 19 02 2C 00` → `setSecurityAccessLevel(3)`, `securityAccess(0)`, `IbstPowerControl(2)`, RET |
-| 4 | `0x006513a0` | `1A 19 0D 03 03 03 02 00 18 00 17 01 1B 00 2C 00` → `restoreUdsContext(25)`, `diagnosticSession(3)`, `setSecurityAccessLevel(3)`, `securityAccess(0)`, `VCWaitForOTAMode(0)`, `udsContextSwitch(1)`, `initializeEraseModule(0)`, RET |
-| 5 | `0x006513b0` | `1A 19 0D 03 03 03 02 00 18 00 17 00 1B 00 2C 00` → `restoreUdsContext(25)`, `diagnosticSession(3)`, `setSecurityAccessLevel(3)`, `securityAccess(0)`, `VCWaitForOTAMode(0)`, `udsContextSwitch(0)`, `initializeEraseModule(0)`, RET |
+| 4 | `0x006513a0` | `1A 19 0D 03 03 03 02 00 18 00 17 01 1B 00 2C 00` → `udsContextSwitch(25)` (open VCRIGHT @ `0x608`/`0x609`), `diagnosticSession(3)`, `setSecurityAccessLevel(3)`, `securityAccess(0)`, `VCWaitForOTAMode(0)`, `vcFrontLockoutIOControl(1)`, `restoreUdsContext(0)`, RET — **VCRIGHT-side OTA prep + IOCBI lockout**, used as preamble in `vcfrontbu` script `0x00651320` |
+| 5 | `0x006513b0` | `1A 19 0D 03 03 03 02 00 18 00 17 00 1B 00 2C 00` → `udsContextSwitch(25)`, `diagnosticSession(3)`, `setSecurityAccessLevel(3)`, `securityAccess(0)`, `VCWaitForOTAMode(0)`, `vcFrontLockoutIOControl(0)`, `restoreUdsContext(0)`, RET — variant of sub 4 with lockout-control byte `0` (release) instead of `1` (engage) |
 | 6–7 | *(null)* | Unsupported |
 | 8+ | `0x0043ab01`+ | Error/status string table (not bytecode — `CALL` into these is invalid) |
 
-> **Note on subroutines 4 & 5:** The first byte `0x1A` = opcode 26 = `udsContextSwitch`, but it appears
-> first — likely these are called after an external context switch has already been set up, and this
-> preamble restores then re-enters a specific node. The `0x19` operand to `restoreUdsContext` and
-> `diagnosticSession` is decimal 25 / `0x19` — passed as the operand byte, not a nested opcode.
+> **Subroutines 4 & 5 are not "restore" preambles** — the leading byte `0x1A` is opcode 26
+> = `udsContextSwitch` (not `restoreUdsContext`, which is opcode 27 = `0x1B`, appearing
+> later in the sequence). Operand `0x19` = decimal 25 = the VCRIGHT node ID (request
+> `0x608`, response `0x609`). The flow is: open a transient handle to VCRIGHT, run
+> extended session + level-3 auth + OTA-mode wait + IOCBI lockout on it, then close the
+> handle and return to the prior context (typically VCFRONT). Used as a prelude in the
+> `vcfrontbu` script (`0x00651320`).
 
 ---
 

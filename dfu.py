@@ -374,12 +374,18 @@ def phase4_flash(
     sess: UdsSession,
     artifacts_dir: Path,
     selected: list,
+    channel: str | None = None,
+    interface: str | None = None,
 ) -> None:
     """Execute the flash sequence for the selected firmware entries.
 
     If `selected` contains a PCS-family dual-CPU pairing (primary +
     secondary), runs script 0x00651070 prog 1 once with both files in a
     single authenticated session. Otherwise loops per-entry through prog 0.
+
+    `channel`/`interface` are forwarded to the FlashContext so steps that need
+    to open a transient session to a different ECU (e.g. SCRIPT_BL_UPDATER_VCFRONT
+    talking to VCRIGHT) can share the user's CAN interface.
     """
     pair = find_dual_cpu_pair(selected)
     if pair is not None:
@@ -413,7 +419,7 @@ def phase4_flash(
 
         print(f"  Script: {script}  module=0x{module_byte:02X}")
         script.module_byte = module_byte
-        script.run(sess, bhx_file, entry)
+        script.run(sess, bhx_file, entry, channel=channel, interface=interface)
 
         if fw_index < len(selected) - 1:
             print("  Continuing to next firmware file...")
@@ -426,6 +432,8 @@ def run_flash(
     artifacts_dir: Path,
     node_name: str,
     force: bool = False,
+    channel: str | None = None,
+    interface: str | None = None,
 ) -> None:
     """Run all four flash phases against an already-open UdsSession."""
     identity = phase1_identity(sess, node_name)
@@ -435,7 +443,7 @@ def run_flash(
     if confirm != "y":
         print("Aborted by user.")
         return
-    phase4_flash(sess, artifacts_dir, selected)
+    phase4_flash(sess, artifacts_dir, selected, channel=channel, interface=interface)
 
 
 def main() -> int:
@@ -520,7 +528,10 @@ def main() -> int:
                 phase4_dry_run(artifacts_dir, selected)
                 return 0
 
-            run_flash(sess, artifacts_dir, args.node, force=args.force)
+            run_flash(
+                sess, artifacts_dir, args.node, force=args.force,
+                channel=args.channel, interface=args.interface,
+            )
 
     except KeyboardInterrupt:
         print("\nAborted.")

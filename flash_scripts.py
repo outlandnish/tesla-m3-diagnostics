@@ -43,6 +43,11 @@ class FlashContext:
     security_level: int = 0    # security access level index
     protocol_ver: int | None = None  # set by step_verify_comp_fw, consumed by step_security_access
     expected_fw_type: int = 0x01  # 1 = regular firmware; 2 = bootloader image
+    # CAN access plumbing for steps that need to open a transient session to
+    # another ECU (e.g. SCRIPT_BL_UPDATER_VCFRONT's VCRIGHT prep). Populated by
+    # phase 4 / `FlashScript.run` from the caller's CLI args.
+    channel: str | None = None
+    interface: str | None = None
 
 
 # Seed level table from DAT_00650e08[idx*16] (uds_security_access at 0x0040c090).
@@ -308,6 +313,59 @@ def step_vendor_preflight(sess: "UdsSession", ctx: FlashContext) -> None:
     sess.vendor_preflight_routine()
 
 
+def step_vcright_ota_prep(sess: "UdsSession", ctx: FlashContext) -> None:
+    """sub4 (`0x006513a0`) — VCRIGHT-side OTA prep before flashing VCFRONT bu.
+
+    Opens a transient UDS session to VCRIGHT (CAN IDs 0x608/0x609) on the
+    same physical CAN channel as the parent VCFRONT session, runs:
+
+        diagnosticSession(3)            extended session
+        setSecurityAccessLevel(3)       internal — sets the override gate
+        securityAccess(0)               seed level 0x05 (the override-protected path)
+        VCWaitForOTAMode(0)             RC 0x540 polling, response[0] must == 2
+        vcFrontLockoutIOControl(1)      IOCBI 0x218 controlParam=3, byte 1
+        restoreUdsContext(0)            (handled by closing the session)
+
+    then closes the VCRIGHT session.
+
+    **Operational prerequisite:** VCWaitForOTAMode requires the vehicle to be
+    actively in OTA state — initiated by the vehicle's overall state machine,
+    not by this tool. On a bench setup this will time out.
+    """
+    if ctx.channel is None:
+        raise RuntimeError(
+            "step_vcright_ota_prep needs a CAN channel on FlashContext. "
+            "Pass it via FlashScript.run(channel=..., interface=...)."
+        )
+
+    # Local imports to avoid pulling these into the module-level dependency
+    # graph (keeps unit tests light).
+    import config as _cfg
+    from uds_local.client import UdsSession
+    from uds_local.node_config import load_node_config
+
+    print("  Step: VCRIGHT-side OTA prep (sub4) — opening transient session")
+    vcright_cfg = load_node_config(
+        "vcright", _cfg.NODES_JSON, _cfg.ETH_COMPACT, _cfg.ODJ_DIR
+    )
+
+    interface = ctx.interface or "socketcan"
+    with UdsSession(vcright_cfg, ctx.channel, interface=interface) as vsess:
+        print("    [VCRIGHT] DiagnosticSessionControl(EXTENDED 0x03)")
+        vsess.diagnostic_session(0x03)
+        # setSecurityAccessLevel(3) is internal: it sets context+0x02 = 3 so
+        # the protocol_ver < 3 override does NOT fire when securityAccess(0)
+        # runs. We replicate that by passing seed_level=0x05 explicitly — the
+        # table value at idx 0 — bypassing the protocol_ver branch altogether.
+        print("    [VCRIGHT] SecurityAccess (idx=0, forced seed_level=0x05)")
+        vsess.security_access(level_idx=0, seed_level=0x05)
+        print("    [VCRIGHT] VCWaitForOTAMode (RC 0x0540 poll for response[0]==2)")
+        vsess.wait_for_ota_mode()
+        print("    [VCRIGHT] IOCBI 0x0218 shortTermAdjustment, control byte 0x01")
+        vsess.io_control_short_term_adjustment(0x0218, 1)
+        print("    [VCRIGHT] closing transient session (restoreUdsContext)")
+
+
 # ---------------------------------------------------------------------------
 # FlashScript
 # ---------------------------------------------------------------------------
@@ -326,7 +384,14 @@ class FlashScript:
     security_level: int = 0
     expected_fw_type: int = 0x01  # 1 = regular firmware; 2 = bootloader image (for SCRIPT_BL)
 
-    def run(self, sess: "UdsSession", bhx_file: object, entry: object) -> None:
+    def run(
+        self,
+        sess: "UdsSession",
+        bhx_file: object,
+        entry: object,
+        channel: str | None = None,
+        interface: str | None = None,
+    ) -> None:
         ctx = FlashContext(
             bhx_file=bhx_file,
             entry=entry,
@@ -334,6 +399,8 @@ class FlashScript:
             erase_timeout=self.erase_timeout,
             security_level=self.security_level,
             expected_fw_type=self.expected_fw_type,
+            channel=channel,
+            interface=interface,
         )
         for step in self.steps:
             step(sess, ctx)
@@ -777,6 +844,32 @@ SCRIPT_BL = FlashScript(
     expected_fw_type=0x02,
 )
 
+# 0x00651320 — vcfront-specific bootloader-updater (`vcfrontbu`)
+# Same as SCRIPT_BL_UPDATER but with a `CALL sub4` preamble that opens a
+# transient session to VCRIGHT, runs OTA-mode prep + IOCBI lockout, and
+# closes it. Used because VCFRONT cannot enter the bootloader-update flow
+# without VCRIGHT being held in a coordinated OTA state first.
+#
+# Requires: VCRIGHT reachable on the same CAN channel; vehicle actively in
+# OTA state (RC 0x0540 must return response[0]==2).
+SCRIPT_BL_UPDATER_VCFRONT = FlashScript(
+    steps=[
+        step_vcright_ota_prep,         # ← sub4 (VCRIGHT detour)
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,           # expected_fw_type=1 (default)
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+)
+
 
 # ---------------------------------------------------------------------------
 # ECU → script map
@@ -883,15 +976,14 @@ ECU_SCRIPT_MAP: dict[str, _Entry] = {
     # Module bytes are from the binary's node table (+0x20). They use the
     # parent ECU's CAN IDs; nothing extra to set up at the transport layer.
     # Scripts: bu uses 0x00651300, bl uses 0x00651340.
-    "parkbu":  (SCRIPT_BL_UPDATER, 0x12),
-    "parkbl":  (SCRIPT_BL,         0x12),
-    "hvbmsbu": (SCRIPT_BL_UPDATER, 0x02),
-    "hvbmsbl": (SCRIPT_BL,         0x02),
-    "hvpbu":   (SCRIPT_BL_UPDATER, 0x0E),
-    "hvpbl":   (SCRIPT_BL,         0x0E),
-    # NOTE: vcfrontbu uses script 0x00651320 (different — adds OTA-mode CALL
-    # sub4 at the start). vcfrontbl uses 0x00651340 like the others. Neither
-    # is mapped here yet — needs SCRIPT_BL_UPDATER_VCFRONT.
+    "parkbu":    (SCRIPT_BL_UPDATER,         0x12),
+    "parkbl":    (SCRIPT_BL,                 0x12),
+    "hvbmsbu":   (SCRIPT_BL_UPDATER,         0x02),
+    "hvbmsbl":   (SCRIPT_BL,                 0x02),
+    "hvpbu":     (SCRIPT_BL_UPDATER,         0x0E),
+    "hvpbl":     (SCRIPT_BL,                 0x0E),
+    "vcfrontbu": (SCRIPT_BL_UPDATER_VCFRONT, 0x0D),
+    "vcfrontbl": (SCRIPT_BL,                 0x0D),
 }
 
 
@@ -899,12 +991,14 @@ ECU_SCRIPT_MAP: dict[str, _Entry] = {
 # verify that the user's --node argument can drive the bootloader flash, and
 # by display logic to group bu+bl with the parent app entry.
 _BL_PARENT_NODE: dict[str, str] = {
-    "parkbu":  "park",
-    "parkbl":  "park",
-    "hvbmsbu": "hvbms",
-    "hvbmsbl": "hvbms",
-    "hvpbu":   "hvp",
-    "hvpbl":   "hvp",
+    "parkbu":    "park",
+    "parkbl":    "park",
+    "hvbmsbu":   "hvbms",
+    "hvbmsbl":   "hvbms",
+    "hvpbu":     "hvp",
+    "hvpbl":     "hvp",
+    "vcfrontbu": "vcfront",
+    "vcfrontbl": "vcfront",
 }
 
 

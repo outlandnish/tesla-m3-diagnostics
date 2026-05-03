@@ -31,15 +31,23 @@ _SID_RTE = 0x37  # RequestTransferExit
 _SID_ER = 0x11  # ECUReset
 _SID_TP = 0x3E  # TesterPresent
 _SID_CDI = 0x14  # ClearDiagnosticInformation
+_SID_IOCBI = 0x2F  # InputOutputControlByIdentifier
 
 _RC_START = 0x01
+_RC_REQUEST_RESULTS = 0x03
 
 # DID 0x0102: moduleToProgram — selects CPU/flash region in bootloader
 _DID_MODULE_TO_PROGRAM = 0x0102
 # DID 0xF100: flash count — enforced per-ECU limit
 _DID_FLASH_COUNT = 0xF100
+# DID 0x0218: VCFRONT door-lock IOCBI used by sub4 lockout sequence
+_DID_VCFRONT_LOCKOUT = 0x0218
+# IOCBI controlParameter values (ISO 14229)
+_IOCP_SHORT_TERM_ADJUSTMENT = 0x03
 # RC 0x0601: vendor pre-flash routine (vcleft / vcleftramapp)
 _RC_VENDOR_PREFLIGHT = 0x0601
+# RC 0x0540: VCWaitForOTAMode — start, then poll until response[0] == 2
+_RC_OTA_MODE = 0x0540
 
 
 class UdsError(Exception):
@@ -239,6 +247,55 @@ class UdsSession:
             if len(resp) >= 5 and resp[4] == 0x01:
                 return
         raise UdsError(_SID_RC, 0x00)
+
+    def wait_for_ota_mode(self, attempts: int = 5) -> None:
+        """VCWaitForOTAMode — RC 0x0540 start, then poll until response byte == 2.
+
+        Replicates `uds_vc_wait_for_ota_mode` (`0x00409dd8`): bumps P2 to 1 s,
+        starts the routine, sleeps 100 ms, polls requestResults; loops up to
+        `attempts` times. Returns on success; raises `UdsError` on timeout or
+        unexpected response.
+
+        Used in sub4 (`0x006513a0`) when prepping VCRIGHT for a VCFRONT bu
+        flash. **Requires the vehicle to actually be in OTA state** — not
+        achievable on a bench setup against a single ECU.
+        """
+        self.set_timeout(1.0)
+        rid_hi = (_RC_OTA_MODE >> 8) & 0xFF
+        rid_lo = _RC_OTA_MODE & 0xFF
+        for attempt in range(attempts):
+            print(f"    wait_for_ota_mode attempt {attempt + 1}/{attempts}")
+            resp = self._send_raw([_SID_RC, _RC_START, rid_hi, rid_lo])
+            if not resp or (resp and resp[0] == 0x7F):
+                # Start failed; brief delay and retry the entire start+poll cycle
+                if resp and len(resp) >= 3 and resp[2] == 0x05:
+                    # NRC 0x05 — pass through, don't sleep
+                    pass
+                else:
+                    time.sleep(1.0)
+                continue
+            time.sleep(0.1)
+            resp = self._send_raw([_SID_RC, _RC_REQUEST_RESULTS, rid_hi, rid_lo])
+            self._check_positive(resp, _SID_RC)
+            # response: 71 03 05 40 <result_count?> <result>
+            if len(resp) >= 5 and resp[4] == 0x02:
+                print(f"    OTA mode active (response[0]=0x02)")
+                return
+        raise UdsError(_SID_RC, 0x00)
+
+    def io_control_short_term_adjustment(self, did: int, control_byte: int) -> None:
+        """IOCBI (0x2F) with controlParameter=3 (shortTermAdjustment) and 1-byte data.
+
+        Used by `vcFrontLockoutIOControl` opcode against DID 0x0218.
+        """
+        payload = [
+            _SID_IOCBI,
+            (did >> 8) & 0xFF, did & 0xFF,
+            _IOCP_SHORT_TERM_ADJUSTMENT,
+            control_byte & 0xFF,
+        ]
+        resp = self._send_raw(payload)
+        self._check_positive(resp, _SID_IOCBI)
 
     def request_download(self, address: int, size: int) -> int:
         """Returns maxBlockLen (number of bytes including sequence counter)."""

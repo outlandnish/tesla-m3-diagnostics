@@ -550,8 +550,66 @@ Module bytes (from the binary's node table at +0x20):
 | `hvbmsbu` | `hvbms` | `0x02` |
 | `hvpbu`   | `hvp`   | `0x0E` |
 
-`vcfrontbu` uses a different script (`0x00651320`, adds OTA-mode `CALL sub4`
-preamble) — not covered here.
+`vcfrontbu` uses a different script (`0x00651320`) — see below.
+
+---
+
+### `0x00651320` — vcfront-specific bootloader-updater (vcfrontbu)
+
+VCFRONT can't be flashed without first putting the **VCRIGHT** ECU into a
+coordinated OTA state (the front and right vehicle controllers share door-lock
+and OTA-state machinery). The `0x00651320` script wraps the standard
+`SCRIPT_BL_UPDATER` body with a leading `CALL sub4` that opens a transient UDS
+handle to VCRIGHT, runs the prep, then closes it:
+
+```
+[prog 0]
+CALL sub4                            ← VCRIGHT-side OTA prep (see below)
+reset(soft) + enterBootloader(0)
+diagnosticSession(2)
+varifyCompAndFirmware(1)             ← fw_type = 1 (the bu agent is "regular firmware")
+securityAccess(0)
+CALL sub1                             moduleToProgram + erase + transfer
+checkModuleProgrammed  checkCorrectComponentAndRev
+reset(soft)
+```
+
+#### `sub4` (`0x006513a0`) — VCRIGHT-side OTA prep + IOCBI lockout
+
+Decoded VM bytecode `1A 19 0D 03 03 03 02 00 18 00 17 01 1B 00 2C 00`:
+
+```
+udsContextSwitch(25)                 ← open VCRIGHT (request 0x608, response 0x609)
+diagnosticSession(3)                 ← extended session
+setSecurityAccessLevel(3)            ← internal: writes 3 to context+0x02
+securityAccess(0)                    ← seed level 0x05 (override doesn't fire because
+                                       ctx+0x02 is now 3, not <3)
+VCWaitForOTAMode(0)                  ← RC 0x540 start, then poll until response[0]==2
+vcFrontLockoutIOControl(1)           ← IOCBI 0x218 controlParam=3, control byte 1
+restoreUdsContext(0)                 ← close VCRIGHT, restore VCFRONT
+RET
+```
+
+> **Operational prerequisite:** RC `0x540` returning `byte == 2` (OTA mode active)
+> requires the **vehicle to actively be in OTA state** — initiated by the vehicle's
+> overall state machine, not by the flash tool. On a bench setup with VCFRONT and
+> VCRIGHT alone on a test bus, this routine will time out and the bu flash will not
+> proceed. Bootloader updates for VCFRONT are practical only against a live, OTA-
+> capable vehicle.
+
+A flash tool implementing this needs:
+
+1. **A second UDS session to VCRIGHT** (CAN IDs from `nodes.json`/ETH compact, sharing
+   the same physical CAN channel as the VCFRONT session).
+2. The sub-4 sequence applied to that VCRIGHT session.
+3. After RET, the VCRIGHT session is closed and the standard bu flash continues
+   against VCFRONT on its normal CAN IDs.
+
+`sub5` (`0x006513b0`) is identical to sub4 but with `vcFrontLockoutIOControl(0)`
+instead of `(1)` — the "release" counterpart to sub4's "engage". Used in some other
+VCFRONT/VCRIGHT scripts but **not** in `0x00651320`.
+
+Module byte for `vcfrontbu` (from the binary's node table): `0x0D`.
 
 ---
 
