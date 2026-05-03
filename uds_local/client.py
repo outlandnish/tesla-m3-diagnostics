@@ -121,21 +121,37 @@ class UdsSession:
         resp = self._send_raw([_SID_DSC, mode])
         self._check_positive(resp, _SID_DSC)
 
-    def security_access(self, level_idx: int = 0) -> None:
+    def security_access(
+        self,
+        level_idx: int = 0,
+        seed_level: int | None = None,
+    ) -> None:
         """Full seed → key exchange.
 
-        level_idx selects the seed/key sub-function pair and algorithm:
-          0 → seed=0x01/key=0x02, tesla_hash (most ECUs)
-          3 → seed=0x07/key=0x08, tesla_hash (ibst, esp, espcal, rcmcal, rcm)
-          4 → seed=0x09/key=0x0A, baolong_hash (tpms)
-          7 → seed=0x0F/key=0x10, pektron_hash (cmp)
-         13 → seed=0x1B/key=0x1C, OTA session key (opc, ths, swc, lumbar, bleep)
+        `level_idx` picks the algorithm (via the node config) and is forwarded
+        to `compute_key`. `seed_level` is the actual UDS sub-function byte;
+        when `None`, falls back to `level_idx * 2 + 1` (legacy behavior, only
+        correct for `level_idx == 0` with `protocol_ver < 3`).
+
+        Seed levels per `DAT_00650e08[idx*16]` in `uds_security_access`:
+          idx 0 → 0x05, but **overridden to 0x01 if protocol_ver < 3** (most ECUs)
+          idx 1 → 0x01
+          idx 2 → 0x05
+          idx 3 → 0x11 (tesla_hash — ibst, esp, espcal, rcmcal, rcm)
+          idx 4 → 0x11 (baolong_hash — tpms)
+          idx 5 → 0x03
+          idx 6 → 0x01
+          idx 7 → 0x05 (pektron-style FUN_0040be8e — cmp)
+        Callers should compute `seed_level` from `protocol_ver` (read at DID
+        0x0101 byte[2]) and pass it explicitly — see flash_scripts.py.
         """
         algo = self._node.security_algorithm
         buf_size = self._node.security_buffer_size
         kw = self._node.security_kw
 
-        seed_subfn = level_idx * 2 + 1
+        if seed_level is None:
+            seed_level = level_idx * 2 + 1
+        seed_subfn = seed_level
         key_subfn = seed_subfn + 1
 
         resp = self._send_raw([_SID_SA, seed_subfn])
@@ -264,8 +280,45 @@ class UdsSession:
         self._check_positive(resp, _SID_ER)
 
     def ecu_reset_no_wait(self, reset_type: int = 0x01) -> None:
-        """Send ECUReset with no response wait (soft reset / fire-and-forget)."""
-        self._send_raw([_SID_ER, reset_type])
+        """Send ECUReset with `suppressPositiveResponse` set — fire-and-forget.
+
+        Frame is `11 (reset_type | 0x80)`. Matches the VM's `reset(0)` opcode
+        (`uds_reset` at `0x0040934c` → `FUN_004301d2(..., '\\0')`), which OR's the
+        SPR bit into the subfunction and does not wait for `51 xx`. Sending plain
+        `11 01` here is technically valid but provokes a positive response the
+        ECU may not finish before it reboots, occasionally racing the bootloader
+        handover.
+        """
+        msg = UdsMessage(
+            payload=bytearray([_SID_ER, reset_type | 0x80]),
+            addressing_type=AddressingType.PHYSICAL,
+        )
+        self._transport.send_message(msg)
+
+    def wait_for_bootloader(
+        self,
+        timeout_s: float = 3.5,
+        interval_s: float = 0.04,
+    ) -> None:
+        """Poll TesterPresent until the bootloader replies, after a reset.
+
+        Replicates the practical effect of `enterBootloader(0)` (VM opcode 0,
+        variant `FUN_00402120` → `FUN_00401f8c`): send `3E 01` at ~40 ms
+        intervals for up to 3.5 s. Returns on the first `7E 01` positive
+        response. The VM also waits for the boot-broadcast CAN ID to change,
+        but the TP poll alone is enough to gate downstream traffic — once the
+        bootloader answers, it's the one taking calls.
+        """
+        deadline = time.monotonic() + timeout_s
+        interval_ms = max(int(interval_s * 1000), 20)
+        while time.monotonic() < deadline:
+            resp = self._send_raw([_SID_TP, 0x01], timeout_ms=interval_ms)
+            if resp and resp[0] == 0x7E:
+                return
+            time.sleep(interval_s)
+        raise TimeoutError(
+            f"Bootloader handover did not complete in {timeout_s}s"
+        )
 
     def sleep(self, seconds: float) -> None:
         time.sleep(seconds)

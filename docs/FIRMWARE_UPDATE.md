@@ -13,12 +13,12 @@ Only the raw SHDR payload bytes are transmitted.
 
 ### GHDR — Global Header
 
-| Offset | Size | Field              | Notes                                                 |
-| ------ | ---- | ------------------ | ----------------------------------------------------- |
-| `0x00` | 4    | Magic `"GHDR"`     |                                                       |
-| `0x04` | 4    | Version            | `1` or `2`, big-endian                                |
-| `0x08` | 4    | Total payload size | Sum of all SHDR payload sizes, not headers            |
-| `0x0C` | 4    | Total size         | **v2 only** — alternate total (redundant with `0x08`) |
+| Offset | Size | Field              | Notes                                                       |
+| ------ | ---- | ------------------ | ----------------------------------------------------------- |
+| `0x00` | 4    | Magic `"GHDR"`     |                                                             |
+| `0x04` | 4    | Version            | `1` or `2`, big-endian                                      |
+| `0x08` | 4    | Total payload size | Sum of all SHDR payload sizes, not headers                  |
+| `0x0C` | 4    | Total size         | **v2 only** — alternate total (redundant with `0x08`)       |
 
 ### SHDR — Section Header (20 bytes) + payload
 
@@ -48,31 +48,38 @@ The `module` byte in the ECU node table (`+0x20`) is loaded into `context+0x29`
 before the VM runs. `moduleToProgram` reads and consumes it, sending `2E 01 02 <module>`
 to select the target CPU/region in the bootloader. For single-CPU ECUs this is `0x00`.
 
+> **Implementation note — every script flow below shows `reset(soft)` as a single
+> step, but the VM emits two opcodes: `reset` followed by `enterBootloader(0)`.**
+> Skipping the `enterBootloader(0)` wait is the most common cause of `moduleToProgram`
+> being rejected — DSC / RDBI / SecurityAccess succeed against the still-running
+> application, but WDBI 0x0102 only exists in the bootloader. See section 0 of the
+> frame-by-frame reference for the handover protocol.
+
 ### ECU → Script Map
 
-| Script       | ECUs                                                                                                                     |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `0x00650fa0` | gtw3                                                                                                                     |
-| `0x00650fb0` | hvbms, cp, epas3p, epas3s, epbl, epbr, hvp, ocs1p, sccmk, vcsec, tas                                                     |
-| `0x00651000` | vcfront, ibstcal                                                                                                         |
-| `0x00651030` | vcright                                                                                                                  |
-| `0x00651050` | vcleft                                                                                                                   |
-| `0x00651070` | pcs (mod=0x00), pcscpu2 (mod=0x0c), pm (mod=0x00), pms (mod=0x00), di (mod=0x0c), dis (mod=0x0c)                         |
-| `0x006510d0` | park                                                                                                                     |
-| `0x006510f0` | park, aps                                                                                                                |
+| Script       | ECUs                                                                                  |
+| ------------ | ------------------------------------------------------------------------------------- |
+| `0x00650fa0` | gtw3                                                                                  |
+| `0x00650fb0` | hvbms, cp, epas3p, epas3s, epbl, epbr, hvp, ocs1p, sccmk, vcsec, tas                |
+| `0x00651000` | vcfront, ibstcal                                                                      |
+| `0x00651030` | vcright                                                                               |
+| `0x00651050` | vcleft                                                                                |
+| `0x00651070` | pcs (mod=0x00), pcscpu2 (mod=0x0c), pm (mod=0x00), pms (mod=0x00), di (mod=0x0c), dis (mod=0x0c) |
+| `0x006510d0` | park                                                                                  |
+| `0x006510f0` | park, aps                                                                             |
 | `0x00651110` | vcleftramapp (mod=0x06), vcrightramapp (mod=0x0f), vcfrontramapp (mod=0x0f), vcsecrumapp (mod=0x0f), sccmksub (mod=0x06) |
-| `0x00651140` | ibst                                                                                                                     |
-| `0x00651170` | espcal (mod=0x07), rcmcal (mod=0x07)                                                                                     |
-| `0x00651190` | esp                                                                                                                      |
-| `0x006511b0` | ibstcal (bootloader path)                                                                                                |
-| `0x006511d0` | rcm                                                                                                                      |
-| `0x006511f0` | tpms                                                                                                                     |
-| `0x00651230` | cmp                                                                                                                      |
-| `0x00651270` | ptc                                                                                                                      |
-| `0x00651290` | vcrightramapp, vcfrontramapp, vcsecrumapp, bleepcenter (mod=0x0f)                                                        |
-| `0x006512b0` | vcleftramapp (mod=0x0f)                                                                                                  |
-| `0x006512d0` | opc (mod=0x0c), opcs (mod=0x0c)                                                                                          |
-| `0x006512e0` | ths (mod=0x0c), swc (mod=0x0c), lumbarl/lumbar/lumbarr (mod=0x0b), bleep\* (various)                                     |
+| `0x00651140` | ibst                                                                                  |
+| `0x00651170` | espcal (mod=0x07), rcmcal (mod=0x07)                                                  |
+| `0x00651190` | esp                                                                                   |
+| `0x006511b0` | ibstcal (bootloader path)                                                             |
+| `0x006511d0` | rcm                                                                                   |
+| `0x006511f0` | tpms                                                                                  |
+| `0x00651230` | cmp                                                                                   |
+| `0x00651270` | ptc                                                                                   |
+| `0x00651290` | vcrightramapp, vcfrontramapp, vcsecrumapp, bleepcenter (mod=0x0f)                     |
+| `0x006512b0` | vcleftramapp (mod=0x0f)                                                               |
+| `0x006512d0` | opc (mod=0x0c), opcs (mod=0x0c)                                                       |
+| `0x006512e0` | ths (mod=0x0c), swc (mod=0x0c), lumbarl/lumbar/lumbarr (mod=0x0b), bleep* (various)  |
 
 ---
 
@@ -197,7 +204,7 @@ transferData
 netSetTimeout(4)
 checkModuleProgrammed  checkCorrectComponentAndRev
 reset(soft)
-
+Shoul
 [prog 2]  — quick re-flash (5s post-reset sleep, no part read)
 reset(soft)  orFlags/andNotFlags
 diagnosticSession(2)  netSetTimeout(1)
@@ -513,18 +520,42 @@ CALL sub5
 
 ## Frame-by-Frame Reference
 
-### 0. Soft Reset (before session)
+### 0. ECUReset and Bootloader Handover (before session)
+
+This is two VM opcodes (`reset` + `enterBootloader`), not one. **A flash tool that
+sends only the reset frame and skips the handover wait will silently end up talking
+to the application instead of the bootloader** — DSC, RDBI 0x0101, and SecurityAccess
+will all succeed (apps support those), but `WDBI 0x0102` (`moduleToProgram`) will be
+rejected because that DID exists only in the bootloader.
+
+**0a. Reset frame** (`reset(0)` in the script, mnemonic "reset(soft)"):
 
 ```
-→ 11 01    ECUReset subfunction 0x01
-  (no response wait — reconnects with TesterPresent retries)
+→ 11 81    ECUReset subfunction 0x01 with suppressPositiveResponse bit set
+  (fire-and-forget — no response wait)
 ```
 
-Reconnect loop waits up to 334×10 ms, retries TesterPresent up to 14 times.
+`reset(1)` and `reset(2)` send `11 01` instead and wait for `51 01`; `reset(2)`
+additionally retries up to 3 times with 10 s between attempts.
+
+**0b. Bootloader handover wait** (`enterBootloader(0)` — always emitted after `reset`):
+
+1. Read the boot-broadcast ID for this node from its CAN channel.
+2. Poll up to **334 × 10 ms = 3.34 s** waiting for the broadcast ID to **change** —
+   the bootloader broadcasts a different ID once it takes over from the application.
+3. Reduce P2 to 40 ms and ping `3E 01` (TesterPresent, response wait) up to 14 times
+   until one succeeds. Restore the prior P2 afterward.
+
+Implementations without DBC-level decoding can substitute steps 1–2 with the
+TesterPresent polling loop alone — retry `3E 01` at ~40 ms intervals for ~3.5 s
+until the bootloader replies `7E 01`. Skip this if the script's first opcode is
+`reset(1)` or `reset(2)`, which already wait for the application's `51 01` ack;
+the `enterBootloader` step that follows is still required to confirm bootloader
+mode before sending DSC.
 
 ---
 
-### 1. Read Part / Serial Info _(logged only — failure does not abort)_
+### 1. Read Part / Serial Info *(logged only — failure does not abort)*
 
 ```
 → 22 F0 12    ReadDataByIdentifier — board part number
@@ -565,16 +596,21 @@ Applied to the CAN handle immediately.
 ← 6E 01 02
 ```
 
+DID `0x0102` is **bootloader-only** — confirm the ECU is in the bootloader (see
+section 0b) before sending. If you skip the handover, this is the first frame that
+will fail (typically NRC `0x31 requestOutOfRange` or `0x22 conditionsNotCorrect`),
+because the application accepts DSC/RDBI/SecurityAccess but not this WDBI.
+
 The `module` byte is taken from the ECU node table entry (`+0x20`) and placed in
 `context+0x29` before the VM runs. `moduleToProgram` reads and consumes it. For
 single-CPU ECUs the module byte is `0x00`.
 
 Module byte values for script `0x00651070` (PCS/DI/PM family):
 
-| ECU                    | Module byte | Meaning                       |
-| ---------------------- | ----------- | ----------------------------- |
-| `pcs`, `pm`, `pms`     | `0x00`      | CPU1 / primary flash region   |
-| `di`, `dis`, `pcscpu2` | `0x0c`      | CPU2 / secondary flash region |
+| ECU | Module byte | Meaning |
+| --- | ----------- | ------- |
+| `pcs`, `pm`, `pms` | `0x00` | CPU1 / primary flash region |
+| `di`, `dis`, `pcscpu2` | `0x0c` | CPU2 / secondary flash region |
 
 ---
 
@@ -585,7 +621,12 @@ Module byte values for script `0x00651070` (PCS/DI/PM family):
 ← 62 01 01 <component_key> <fw_type> <protocol_ver>
 ```
 
-`fw_type` must match the expected value for this ECU. Mismatch → abort.
+Three data bytes after the DID echo, in this order:
+- byte[0] = `component_key` — logged only
+- byte[1] = `fw_type` — must match the operand passed to `varifyCompAndFirmwareType`
+  (always `1` for prog-0 flash flows). Mismatch → abort with error `0x10000 | fw_type`.
+- byte[2] = `protocol_ver` — stored at `context+0x02` and consumed by the next
+  `securityAccess` step to choose the seed level (see section 5).
 
 ---
 
@@ -601,13 +642,24 @@ Module byte values for script `0x00651070` (PCS/DI/PM family):
 
 The seed level and key algorithm vary by ECU:
 
-| Security idx | Algorithm       | Level  | ECUs                               |
-| ------------ | --------------- | ------ | ---------------------------------- |
-| 0            | `tesla_hash`    | 0x01   | most ECUs                          |
-| 3            | `tesla_hash`    | varies | ibst, esp, espcal, rcmcal, rcm     |
-| 4            | `baolong_hash`  | varies | tpms                               |
-| 7            | `FUN_0040be8e`  | varies | cmp                                |
-| 13           | OTA session key | varies | opc, opcs, ths, swc, lumbar, bleep |
+| Security idx | Algorithm          | Level             | ECUs                              |
+| ------------ | ------------------ | ----------------- | --------------------------------- |
+| 0            | `tesla_hash`       | 0x05 (see below)  | most ECUs                         |
+| 3            | `tesla_hash`       | varies            | ibst, esp, espcal, rcmcal, rcm    |
+| 4            | `baolong_hash`     | varies            | tpms                              |
+| 7            | `FUN_0040be8e`     | varies            | cmp                               |
+| 13           | OTA session key    | varies            | opc, opcs, ths, swc, lumbar, bleep|
+
+> **Protocol-version branch for idx 0** (`uds_security_access` at `0x0040c090`):
+> the default seed level from the table (`DAT_00650e08[0]`) is `0x05`, but if
+> `protocol_ver` (read in section 4 and stashed at `context+0x02`) is **less than 3**,
+> the level is overridden to `0x01`. So a flash tool implementing idx 0 must:
+>
+> 1. read DID `0x0101` and remember `byte[2]` (`protocol_ver`),
+> 2. send `27 01` / `27 02` if `protocol_ver < 3`, else `27 05` / `27 06`.
+>
+> NRC `0x35` (requestSequenceError) at the seed step means the ECU is already
+> unlocked — silently treat as success.
 
 `tesla_hash` — computed by your security provider (not shipped):
 
@@ -631,15 +683,15 @@ If ECU responds with NRC `0x35` (already unlocked), silently accepted.
 
 Timeout during erase — set before sending, restore after:
 
-| Script              | Erase timeout     |
-| ------------------- | ----------------- |
-| Standard            | P2=3s / P2\*=6s   |
-| `0x00651070` (PCS)  | P2=5s / P2\*=10s  |
-| `0x006510d0` (park) | P2=1s / P2\*=2s   |
-| `0x00651140` (ibst) | P2=4s / P2\*=8s   |
-| `0x006511d0` (rcm)  | P2=4s / P2\*=8s   |
-| `0x006511f0` (tpms) | P2=3s / P2\*=6s   |
-| `0x00651270` (ptc)  | P2=10s / P2\*=20s |
+| Script               | Erase timeout       |
+| -------------------- | ------------------- |
+| Standard             | P2=3s / P2\*=6s     |
+| `0x00651070` (PCS)   | P2=5s / P2\*=10s    |
+| `0x006510d0` (park)  | P2=1s / P2\*=2s     |
+| `0x00651140` (ibst)  | P2=4s / P2\*=8s     |
+| `0x006511d0` (rcm)   | P2=4s / P2\*=8s     |
+| `0x006511f0` (tpms)  | P2=3s / P2\*=6s     |
+| `0x00651270` (ptc)   | P2=10s / P2\*=20s   |
 
 ---
 
@@ -693,7 +745,7 @@ ECU recomputes CRC of flashed image against trailing CRC word in payload.
 
 ---
 
-### 12. Verify Component / Revision Match
+### 11. Verify Component / Revision Match
 
 ```
 → 31 01 02 02    RoutineControl startRoutine 0x0202
@@ -705,7 +757,7 @@ Validates COMPONENT_ID, PCBA_ID, ASSEMBLY_ID, USAGE_ID against stored identity.
 
 ---
 
-### 13. ECU Reset
+### 12. ECU Reset
 
 ```
 → 11 01    ECUReset
@@ -726,9 +778,9 @@ file(s) using the lookup tables in `seed_artifacts_v2/`.
 
 Two files provide the same mapping; use `signed_metadata_map.tsv` in production:
 
-| File                      | Description                                                                                                                                               |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version_map2.tsv`        | Unsigned lookup table — 6 tab-separated columns                                                                                                           |
+| File | Description |
+| ---- | ----------- |
+| `version_map2.tsv` | Unsigned lookup table — 6 tab-separated columns |
 | `signed_metadata_map.tsv` | Signed version — same 6 columns plus a 7th base64 per-entry signature. First line is a manifest header (`<sha1>\t<entry_count>`) — skip it during lookup. |
 
 ### Column format
@@ -777,28 +829,51 @@ lookup key came from `pm`.
 
 ### Flash ordering for multi-file ECUs
 
-TSV row order is authoritative. For PCS, CPU1 (`ecu_type=pcs`) rows always appear before
-CPU2 (`ecu_type=pcscpu2`) rows. Flash in TSV order:
+PCS-family ECUs that resolve to **both** a primary and a secondary BHX file
+have two valid execution paths. Either works; **prog 1 is preferred** when both
+files are available up-front.
+
+#### Prog 1 — single authenticated session, both CPUs (preferred)
+
+When the lookup yields both a primary (`ecu_type ∈ {pcs, pm, pms}`) and a
+secondary (`ecu_type ∈ {pcscpu2, di, dis}`) entry, run script `0x00651070`
+**prog 1** once with both files. CPU2/secondary is flashed first using
+bootloader-internal `moduleToProgram(4)`, then CPU1/primary using
+`moduleToProgram(0)`, in a single `securityAccess` window:
+
+```
+reset(soft) + enterBootloader(0)
+diagnosticSession(2)  varifyCompAndFirmware  securityAccess(0)
+moduleToProgram(4)   netSetTimeout(30)      → secondary
+initializeEraseModule  netSetTimeout(1)  transferData  checkModuleProgrammed
+moduleToProgram(0)   netSetTimeout(30)      → primary
+initializeEraseModule  transferData  netSetTimeout(4)
+checkModuleProgrammed  checkCorrectComponentAndRev  reset(soft)
+```
+
+The `4` and `0` operands are **bootloader-internal region codes**, distinct
+from the node table module bytes (`0x0C` / `0x00`) used by prog 0. Use these
+literals when running prog 1; do not derive them from the script map.
+
+#### Prog 0 ×2 — fallback when files arrive separately
+
+If the firmware files arrive incrementally (e.g. streaming OTA) and you can
+only stage one at a time, run prog 0 twice. TSV row order is authoritative —
+CPU1 (`ecu_type=pcs`) rows always appear before CPU2 (`ecu_type=pcscpu2`):
 
 1. Flash `pcs.bhx` → `moduleToProgram` sends `2E 01 02 00` → CPU1 at `0x00088000`
 2. Flash `pcscpu2.bhx` → `moduleToProgram` sends `2E 01 02 0C` → CPU2 at `0x00082000`
 
 Each entry goes through its own full prog-0 sequence (reset → session → auth →
-moduleToProgram → erase → transfer → verify → reset). **Both BHX files must be staged
-before the update sequence begins** — the second flash follows immediately after the
-first reset with no opportunity to load files between them.
+moduleToProgram → erase → transfer → verify → reset). The module byte comes
+from the node table entry for each `ecu_type`, **not** from the BHX file. The
+SHDR target address and payload size are the only BHX-derived values passed
+to the ECU (via `RequestDownload`).
 
-The module byte comes from the node table entry for each `ecu_type`, **not** from the
-BHX file. The SHDR target address and payload size are the only BHX-derived values
-passed to the ECU (via `RequestDownload`).
-
-### Prog 1 module bytes vs node module bytes
-
-Script `0x00651070` prog 1 hardcodes `moduleToProgram(4)` then `moduleToProgram(0)`.
-These are PCS bootloader-internal region codes for flashing both CPUs in a single
-authenticated session. They are **distinct** from the node table module bytes
-(`0x00` / `0x0C`) used by prog 0. A flash tool using prog 0 should use the `ecu_type`
-node's module byte from the script map, not these internal codes.
+> **Implementations should auto-switch to prog 1 when both files are present.**
+> A primary/secondary pair detected at firmware-selection time is the trigger;
+> running prog 0 twice for the same ECU update wastes one full
+> reset / handover / auth round-trip.
 
 ---
 

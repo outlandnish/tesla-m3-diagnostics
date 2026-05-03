@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import config as _cfg
-from flash_scripts import get_script
+from flash_scripts import find_dual_cpu_pair, get_script, run_pcs_dual_cpu
 from uds_local.client import UdsSession
 
 _NODES_JSON  = _cfg.NODES_JSON
@@ -122,6 +122,8 @@ def phase2_firmware_selection(
                 except (ValueError, IndexError):
                     _abort(f"Invalid selection: {raw!r}")
 
+    selected = _prompt_dual_cpu_choice(selected)
+
     for e in selected:
         src = artifacts_dir / e.src_path
         if not src.exists():
@@ -129,6 +131,32 @@ def phase2_firmware_selection(
         print(f"  Selected: {e.src_path} → {e.dest_name}  crc={e.crc}")
 
     return selected
+
+
+def _prompt_dual_cpu_choice(selected: list) -> list:
+    """If `selected` contains a PCS-family dual-CPU pair, ask which CPU(s) to flash.
+
+    Returns the (possibly narrowed) entry list. Default (empty input) is "both",
+    which lets phase 4 dispatch to prog 1 (single auth session). Picking just
+    one CPU drops back to prog 0 for that entry.
+    """
+    pair = find_dual_cpu_pair(selected)
+    if pair is None:
+        return selected
+    primary, secondary = pair
+    print("\n  Dual-CPU PCS-family pairing detected:")
+    print(f"    [1] primary only   ({primary.dest_name}, ecu_type={primary.component})")
+    print(f"    [2] secondary only ({secondary.dest_name}, ecu_type={secondary.component})")
+    print(f"    [3] both           — prog 1, single authenticated session [default]")
+    while True:
+        raw = input("  Flash which? [1/2/3]: ").strip() or "3"
+        if raw == "1":
+            return [primary]
+        if raw == "2":
+            return [secondary]
+        if raw == "3":
+            return [primary, secondary]
+        print(f"  Invalid choice: {raw!r}")
 
 
 def _decode_pcs_identity(data: bytes) -> dict | None:
@@ -225,6 +253,23 @@ def phase4_dry_run(artifacts_dir: Path, selected: list) -> None:
     """Print what would be flashed without sending any UDS frames."""
     _print_section("Phase 4: Dry Run — Flash Plan")
 
+    pair = find_dual_cpu_pair(selected)
+    if pair is not None:
+        primary_entry, secondary_entry = pair
+        primary_bhx = _parse_firmware(artifacts_dir / primary_entry.src_path)
+        secondary_bhx = _parse_firmware(artifacts_dir / secondary_entry.src_path)
+        print("\n  PCS-family dual-CPU pairing detected — using prog 1 (single auth session)")
+        print(f"    primary   ({primary_entry.dest_name}, ecu_type={primary_entry.component})"
+              f"  → moduleToProgram(0x00)")
+        for i, seg in enumerate(primary_bhx.segments):
+            print(f"      [{i}] addr=0x{seg.start_address:08X}  size={seg.length} bytes")
+        print(f"    secondary ({secondary_entry.dest_name}, ecu_type={secondary_entry.component})"
+              f"  → moduleToProgram(0x04) [flashed first]")
+        for i, seg in enumerate(secondary_bhx.segments):
+            print(f"      [{i}] addr=0x{seg.start_address:08X}  size={seg.length} bytes")
+        print("\n  (dry run complete — no frames sent)")
+        return
+
     for entry in selected:
         ecu_type = entry.component.lower()
         try:
@@ -258,7 +303,29 @@ def phase4_flash(
     artifacts_dir: Path,
     selected: list,
 ) -> None:
-    """Execute the flash sequence for each selected firmware entry."""
+    """Execute the flash sequence for the selected firmware entries.
+
+    If `selected` contains a PCS-family dual-CPU pairing (primary +
+    secondary), runs script 0x00651070 prog 1 once with both files in a
+    single authenticated session. Otherwise loops per-entry through prog 0.
+    """
+    pair = find_dual_cpu_pair(selected)
+    if pair is not None:
+        primary_entry, secondary_entry = pair
+        _print_section(
+            f"Phase 4: Flash (dual-CPU) — "
+            f"{primary_entry.dest_name} + {secondary_entry.dest_name}"
+        )
+        primary_bhx = _parse_firmware(artifacts_dir / primary_entry.src_path)
+        secondary_bhx = _parse_firmware(artifacts_dir / secondary_entry.src_path)
+        run_pcs_dual_cpu(
+            sess,
+            primary_bhx, primary_entry,
+            secondary_bhx, secondary_entry,
+        )
+        print("  Flash complete.")
+        return
+
     for fw_index, entry in enumerate(selected):
         _print_section(f"Phase 4: Flash — {entry.dest_name}")
 

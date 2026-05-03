@@ -5,9 +5,12 @@ Each node merges its listed ODJ sources; ECU-specific entries override `COMMON_c
 
 `sl` = security level (0 = no auth required; 3/5/11 = SecurityAccess needed first).
 
-> **Note:** All DIDs and security levels here are derived from `nodes.json` in firmware
-> **2019.20.4.2.model3**. DID availability, byte layouts, and security requirements may differ
-> across firmware versions — treat this as a reference point, not a universal spec.
+**Field order in the `Fields` column reflects wire byte order (byte 0 → byte N).** ODJ files
+list fields alphabetically by name, not by `byte_position` — this table presents them sorted
+by `byte_position` so readers can decode responses left-to-right. For DID `0x101` specifically,
+this matters: the firmware-flash VM (`hashpicker_sim` opcode 1) validates `byte[1]` as
+`FIRMWARE_TYPE` and uses `byte[2]` as the protocol version for security-level branching —
+see [FIRMWARE_UPDATE.md](FIRMWARE_UPDATE.md) sections 4–5.
 
 ---
 
@@ -44,7 +47,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x401` | LATCH_SENSOR_CALIBRATION_DATA | R/W | 0 | 4B | OFFSET |
 | `0x402` | DOOR_SENSOR_CALIBRATION_DATA | R/W | 0 | 4B | OFFSET |
 | `0x403` | COVER_SENSOR_CALIBRATION_DATA | R/W | 0 | 4B | OFFSET |
@@ -65,7 +68,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x102` | MODULE_TO_PROGRAM | R | 0 | 1B | MODULE_TYPE |
 | `0x300` | EDR_NUM_EVENTS | R | 0 | 1B | NUM_EVENTS |
 | `0x301` | EDR_EVENT_TO_FETCH | R/W | 0 | 1B | BLACK_BOX_TAG |
@@ -89,7 +92,7 @@ Security: `tesla_hash`, 16B seed. Both nodes use the same ODJ.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMP_AND_FW_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMP_AND_FW_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x300` | CALIBRATION_DATA | R/W | 0 | 10B | MOTOR_TYPE, PH_A_GAIN, PH_B_GAIN |
 | `0x301` | HVIL_STATUS | R | 0 | 1B | HVIL_PRESENT |
 | `0x303` | HIGHSPEED_STATS | R | 0 | 16B | OVSPD_HISTOGRAM |
@@ -122,7 +125,7 @@ Security: `tesla_hash`, 16B seed. Both nodes use `EPB3.odj`.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0xE00` | GET_ECULOG_DESCRIPTOR | R | 0 | 10B | LOG_IDENTIFIER, PRIORITY, PROTOCOL_ID, SIZE |
 | `0xF00` | APPLICATION_CRC | R | 0 | 4B | APPLICATION_CRC |
 | `0xF05` | COMPONENT_BUILD_TYPE | R | 0 | 1B | COMPONENT_BUILD_TYPE |
@@ -159,7 +162,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x403` | BMB_MODULE_IDS | R | 0 | 16B | BMB_1..8_MODULE_ID |
 | `0x410` | BRICKV_DATA | R | 0 | 251B | BRICKV_1..108 + BRICKV_N_STATUS + PACK_CURRENT, PACK_VOLTAGE |
 | `0x412` | BMS_HV_LINK_VOLTAGE_DATA | R | 0 | 24B | DC_LINK_MINUS/PLUS_VOLTAGE, FC_LINK_MINUS/PLUS_VOLTAGE, PACK_MINUS/PLUS_VOLTAGE |
@@ -187,7 +190,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x403` | HVIL_STATUS | R | 0 | 1B | HVIL_STATUS |
 | `0x404` | CPIL_STATUS | R | 0 | 1B | CPIL_OK |
 | `0x410` | BRICKV_DATA | R | 0 | 251B | BRICKV_1..108 + STATUS + PACK_CURRENT, PACK_VOLTAGE |
@@ -217,7 +220,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x400` | CUSHION_MUT_EMPTY | R | 0 | 4B | CUSHION_MUT_EMPTY |
 | `0x401` | CUSHION_MUT_SMALL_ALLOW | R | 0 | 4B | CUSHION_MUT_SMALL_ALLOW |
 | `0x402` | CUSHION_MUT_LARGE_ALLOW | R | 0 | 4B | CUSHION_MUT_LARGE_ALLOW |
@@ -251,7 +254,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMP_AND_FW_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMP_AND_FW_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x301` | SENSORS_DATA | R | 0 | 24B | HV_BUS_VOLTAGE, LV_BUS_VOLTAGE, L1/L2/L3_N_INPUT_VOLTAGE_RMS, N_G_INPUT_VOLTAGE_RMS |
 | `0xE00` | GET_ECULOG_DESCRIPTOR | R | 0 | 9B | LOG_IDENTIFIER, PROTOCOL_ID, SIZE |
 | `0xF00` | Application_CRC | R | 0 | 4B | APPLICATION_CRC |
@@ -274,7 +277,7 @@ Security: `tesla_hash`, 16B seed. Both nodes use the same ODJ.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x102` | MODULE_TO_PROGRAM | R | 0 | 1B | MODULE_TYPE |
 | `0x103` | TOOL_SERIAL_NUMBER | R | 0 | 10B | SERIAL_NUMBER |
 | `0x201` | DBG_ERROR_MSG | R | 0 | 10B | ERROR_PARAM_1, ERROR_PARAM_2, ERROR_TYPE |
@@ -303,7 +306,7 @@ Security: **`pektron_hash`**, 3B seed, fixed bytes `6E6164616D` ("nadam").
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | FIRMWARE_TYPE, UDS_PROTOCOL_VERSION, UNUSED |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | UNUSED, FIRMWARE_TYPE, UDS_PROTOCOL_VERSION |
 | `0xF00` | APPLICATION_CHECKSUM | R | 0 | 4B | APPLICATION_CHECKSUM |
 | `0xF04` | CALIBRATION_CHECKSUM | R | 0 | 4B | CALIBRATION_CHECKSUM |
 | `0xF07` | BOOTLOADER_CHECKSUM | R | 0 | 4B | BOOTLOADER_CHECKSUM |
@@ -349,7 +352,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0xA030` | CONTI_CALIBRATION_HEIGHT_FL | R/W | 0 | 2B | CALIBRATION_VALUE |
 | `0xA031` | CONTI_CALIBRATION_HEIGHT_FR | R/W | 0 | 2B | CALIBRATION_VALUE |
 | `0xA032` | CONTI_CALIBRATION_HEIGHT_RL | R/W | 0 | 2B | CALIBRATION_VALUE |
@@ -402,7 +405,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x850` | DEBUG_MODULES | R | 0 | 0B | (trigger only) |
 | `0xE00` | GET_ECULOG_DESCRIPTOR | R | 0 | 10B | LOG_IDENTIFIER, PRIORITY, PROTOCOL_ID, SIZE |
 | `0xF00` | APPLICATION_CRC | R | 0 | 4B | APPLICATION_CRC |
@@ -432,7 +435,7 @@ Security: `tesla_hash`, 16B seed. Includes ROHC intrusion sensor genealogy DIDs 
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x561` | ROHC_SERIAL_NUMBER | R | 0 | 14B | SN_BYTE_0..13 |
 | `0x562` | ROHC_COMPENSATION_VALUE | R | 0 | 1B | COMPENSATION_VALUE |
 | `0x563` | ROHC_PART_NUMBER | R | 0 | 20B | PN_BYTE_0..19 |
@@ -474,7 +477,7 @@ Security: `tesla_hash`, 16B seed.
 
 | DID | Name | R/W | sl | Size | Fields |
 |---|---|---|---|---|---|
-| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | BOOTLOADER_PROTOCOL_VERSION, COMPONENT_KEY, FIRMWARE_TYPE |
+| `0x101` | COMPONENT_AND_FIRMWARE_TYPE | R | 0 | 3B | COMPONENT_KEY, FIRMWARE_TYPE, BOOTLOADER_PROTOCOL_VERSION |
 | `0x301` | GET_RANDOM | R | 0 | 10B | SUB_USAGE_ID |
 | `0x850` | DEBUG_MODULES | R | 0 | 0B | (trigger only) |
 | `0x852` | NFC_AMPLITUDE_MEASUREMENT | R | 0 | 3B | CENTER_NFC_READER_AMPLITUDE, LEFT_B_PILLAR_NFC_READER_AMPLITUDE, RIGHT_B_PILLAR_NFC_READER_AMPLITUDE |

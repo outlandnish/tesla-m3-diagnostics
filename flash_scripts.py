@@ -41,6 +41,21 @@ class FlashContext:
     module_byte: int = 0x00    # written by module_to_program step
     erase_timeout: float = 3.0 # P2 seconds applied around erase (restored after)
     security_level: int = 0    # security access level index
+    protocol_ver: int | None = None  # set by step_verify_comp_fw, consumed by step_security_access
+
+
+# Seed level table from DAT_00650e08[idx*16] (uds_security_access at 0x0040c090).
+# idx 0 is overridden to 0x01 if protocol_ver < 3.
+_SECURITY_SEED_LEVEL = {
+    0: 0x05,
+    1: 0x01,
+    2: 0x05,
+    3: 0x11,
+    4: 0x11,
+    5: 0x03,
+    6: 0x01,
+    7: 0x05,
+}
 
 
 StepFn = Callable[["UdsSession", FlashContext], None]
@@ -51,10 +66,27 @@ StepFn = Callable[["UdsSession", FlashContext], None]
 # ---------------------------------------------------------------------------
 
 def step_soft_reset(sess: "UdsSession", ctx: FlashContext) -> None:
-    """ECUReset with suppressPositiveResponse (opcode 8 operand 1 — no response wait)."""
-    print("  Step: ECUReset (suppress response, no wait)")
+    """ECUReset `11 81` (subfunction 0x01 with SPR set) — fire-and-forget.
+
+    Matches VM `reset(0)`. Used both as the opening reset that hands control to
+    the bootloader (must be followed by `step_wait_for_bootloader`) and as the
+    trailing reset that returns control to the application (no handover wait
+    needed).
+    """
+    print("  Step: ECUReset 11 81 (SPR, no wait)")
     sess.ecu_reset_no_wait(0x01)
     sess.sleep(0.5)
+
+
+def step_wait_for_bootloader(sess: "UdsSession", ctx: FlashContext) -> None:
+    """Wait for the bootloader to take over after a reset (VM `enterBootloader(0)`).
+
+    Required after the opening reset of every flash script. Without this, the
+    application services DSC / RDBI / SecurityAccess (they all succeed there)
+    but `WDBI 0x0102` (`moduleToProgram`) is bootloader-only and gets rejected.
+    """
+    print("  Step: Wait for bootloader handover")
+    sess.wait_for_bootloader()
 
 
 def step_hard_reset(sess: "UdsSession", ctx: FlashContext) -> None:
@@ -108,22 +140,47 @@ def step_programming_session(sess: "UdsSession", ctx: FlashContext) -> None:
 
 
 def step_verify_comp_fw(sess: "UdsSession", ctx: FlashContext) -> None:
-    """RDBI 0x0101 — log component key, fw type, protocol ver."""
+    """RDBI 0x0101 — validate fw_type, stash protocol_ver on the context.
+
+    Wire byte order (per ODJ + VM `uds_varify_comp_and_firmware`):
+      byte[0] = COMPONENT_KEY (informational)
+      byte[1] = FIRMWARE_TYPE — must be 0x01 for prog-0 flash flows
+      byte[2] = BOOTLOADER_PROTOCOL_VERSION — drives security level branching
+    """
     print("  Step: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
     comp_fw = sess.read_did(0x0101)
     if len(comp_fw) < 3:
         from uds_local.client import UdsError
         raise UdsError(0x22, 0x00)
+    component_key = comp_fw[0]
+    fw_type = comp_fw[1]
+    protocol_ver = comp_fw[2]
     print(
-        f"    protocol_ver=0x{comp_fw[0]:02X}"
-        f"  component_key=0x{comp_fw[1]:02X}"
-        f"  fw_type=0x{comp_fw[2]:02X}"
+        f"    component_key=0x{component_key:02X}"
+        f"  fw_type=0x{fw_type:02X}"
+        f"  protocol_ver=0x{protocol_ver:02X}"
     )
+    if fw_type != 0x01:
+        raise ValueError(
+            f"Unexpected FIRMWARE_TYPE 0x{fw_type:02X} at DID 0x0101 "
+            f"(expected 0x01 — wrong file or wrong ECU?)"
+        )
+    ctx.protocol_ver = protocol_ver
 
 
 def step_security_access(sess: "UdsSession", ctx: FlashContext) -> None:
-    print(f"  Step: SecurityAccess (level_idx={ctx.security_level})")
-    sess.security_access(ctx.security_level)
+    """SecurityAccess with the seed level chosen from protocol_ver + idx."""
+    idx = ctx.security_level
+    base_level = _SECURITY_SEED_LEVEL.get(idx, idx * 2 + 1)
+    if idx == 0 and ctx.protocol_ver is not None and ctx.protocol_ver < 3:
+        seed_level = 0x01  # legacy-protocol override
+    else:
+        seed_level = base_level
+    print(
+        f"  Step: SecurityAccess (idx={idx} protocol_ver={ctx.protocol_ver}"
+        f" seed_level=0x{seed_level:02X})"
+    )
+    sess.security_access(level_idx=idx, seed_level=seed_level)
 
 
 def step_module_to_program(sess: "UdsSession", ctx: FlashContext) -> None:
@@ -284,6 +341,7 @@ SCRIPT_GTW3 = FlashScript(steps=[])
 SCRIPT_STANDARD = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_board_info,
         step_programming_session,
         step_verify_comp_fw,
@@ -302,6 +360,7 @@ SCRIPT_STANDARD = FlashScript(
 SCRIPT_VCFRONT = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -319,6 +378,7 @@ SCRIPT_VCFRONT = FlashScript(
 SCRIPT_VCRIGHT = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -337,6 +397,7 @@ SCRIPT_VCLEFT = FlashScript(
     steps=[
         step_vendor_preflight,
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -355,6 +416,7 @@ SCRIPT_VCLEFT = FlashScript(
 SCRIPT_PCS = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_board_info,
         step_programming_session,
         step_verify_comp_fw,
@@ -374,6 +436,7 @@ SCRIPT_PCS = FlashScript(
 SCRIPT_PARK = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -392,6 +455,7 @@ SCRIPT_PARK = FlashScript(
 SCRIPT_APS = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_board_info,
         step_programming_session,
         step_verify_comp_fw,
@@ -411,6 +475,7 @@ SCRIPT_APS = FlashScript(
 SCRIPT_RAMAPP = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -429,6 +494,7 @@ SCRIPT_IBST = FlashScript(
         step_check_flash_count_2,
         step_clear_dtc,
         step_soft_reset,
+        step_wait_for_bootloader,
         step_board_info,
         step_programming_session,
         step_verify_comp_fw,
@@ -448,6 +514,7 @@ SCRIPT_IBST = FlashScript(
 SCRIPT_ESPCAL = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -467,6 +534,7 @@ SCRIPT_ESP = FlashScript(
     steps=[
         step_check_flash_count_1,
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -484,6 +552,7 @@ SCRIPT_IBSTCAL = FlashScript(
     steps=[
         step_check_flash_count_0,
         step_hard_reset_with_retries,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -503,6 +572,7 @@ SCRIPT_RCM = FlashScript(
     steps=[
         step_check_flash_count_0,
         step_hard_reset_with_retries,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -522,6 +592,7 @@ SCRIPT_RCM = FlashScript(
 SCRIPT_TPMS = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -540,6 +611,7 @@ SCRIPT_TPMS = FlashScript(
 SCRIPT_CMP = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_board_info,
         step_programming_session,
         step_verify_comp_fw,
@@ -558,6 +630,7 @@ SCRIPT_CMP = FlashScript(
 SCRIPT_PTC = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -575,6 +648,7 @@ SCRIPT_PTC = FlashScript(
 SCRIPT_RAMAPP_ALT = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -591,6 +665,7 @@ SCRIPT_VCLEFTRAMAPP = FlashScript(
     steps=[
         step_vendor_preflight,
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -607,6 +682,7 @@ SCRIPT_VCLEFTRAMAPP = FlashScript(
 SCRIPT_OPC = FlashScript(
     steps=[
         step_soft_reset,
+        step_wait_for_bootloader,
         step_programming_session,
         step_verify_comp_fw,
         step_security_access,
@@ -753,3 +829,178 @@ def get_script(ecu_type: str) -> _Entry:
             f"Known types: {sorted(ECU_SCRIPT_MAP)}"
         )
     return ECU_SCRIPT_MAP[key]
+
+
+# ---------------------------------------------------------------------------
+# Dual-CPU prog 1 (script 0x00651070): one authenticated session, both CPUs
+# ---------------------------------------------------------------------------
+#
+# Script 0x00651070 prog 1 flashes both CPUs of a PCS-family ECU in a single
+# authenticated session. CPU2 (the secondary, ecu_type=pcscpu2/di/dis) is
+# flashed first with bootloader-internal module byte 0x04, then CPU1
+# (ecu_type=pcs/pm/pms) with module byte 0x00. The 0x04/0x00 codes are
+# distinct from the prog-0 node module bytes (0x0C / 0x00) — see
+# FIRMWARE_UPDATE.md "Prog 1 module bytes vs node module bytes".
+#
+# When find_firmware returns both a primary and a secondary entry for the same
+# lookup, dfu.py auto-switches to this sequence instead of running prog 0
+# twice.
+
+# ecu_type → role in PCS-family dual-CPU pairings
+_PCS_PRIMARY_TYPES   = frozenset({"pcs", "pm", "pms"})
+_PCS_SECONDARY_TYPES = frozenset({"pcscpu2", "di", "dis"})
+
+# Bootloader-internal module bytes used by prog 1 (NOT the prog-0 node bytes)
+_PROG1_MODULE_SECONDARY = 0x04
+_PROG1_MODULE_PRIMARY   = 0x00
+
+
+def find_dual_cpu_pair(selected: list) -> tuple[object, object] | None:
+    """Detect a PCS-family dual-CPU pairing in `selected`.
+
+    Returns `(primary_entry, secondary_entry)` if both a primary and secondary
+    PCS-family ecu_type are present; otherwise `None`. Each entry must expose a
+    `component` attribute (matches metadata.FirmwareEntry).
+    """
+    primary: object | None = None
+    secondary: object | None = None
+    for entry in selected:
+        ecu_type = entry.component.lower()
+        if ecu_type in _PCS_PRIMARY_TYPES and primary is None:
+            primary = entry
+        elif ecu_type in _PCS_SECONDARY_TYPES and secondary is None:
+            secondary = entry
+    if primary is not None and secondary is not None:
+        return primary, secondary
+    return None
+
+
+def run_pcs_dual_cpu(
+    sess: "UdsSession",
+    primary_bhx: object,
+    primary_entry: object,
+    secondary_bhx: object,
+    secondary_entry: object,
+) -> None:
+    """Execute script 0x00651070 prog 1 — both CPUs in one authenticated session.
+
+    Sequence (matches the decoded VM bytecode at 0x00651070+0x30):
+      reset(soft) + enterBootloader(0)
+      diagnosticSession(2)
+      varifyCompAndFirmwareType(1)
+      securityAccess(0)                       — protocol_ver-aware
+      moduleToProgram(4)   netSetTimeout(30)  — CPU2/secondary
+      initializeEraseModule(0)
+      netSetTimeout(1)
+      transferData(secondary_bhx)
+      checkModuleProgrammedCorrectly
+      moduleToProgram(0)   netSetTimeout(30)  — CPU1/primary
+      initializeEraseModule(0)
+      transferData(primary_bhx)
+      netSetTimeout(4)
+      checkModuleProgrammedCorrectly
+      checkCorrectComponentAndRev
+      reset(soft)
+    """
+    print(f"  Dual-CPU sequence (prog 1, single auth session):")
+    print(f"    primary   ({primary_entry.dest_name}, ecu_type={primary_entry.component})"
+          f"  → moduleToProgram(0x{_PROG1_MODULE_PRIMARY:02X})")
+    print(f"    secondary ({secondary_entry.dest_name}, ecu_type={secondary_entry.component})"
+          f"  → moduleToProgram(0x{_PROG1_MODULE_SECONDARY:02X}) [flashed first]")
+
+    print("  Step: ECUReset 11 81 (SPR, no wait)")
+    sess.ecu_reset_no_wait(0x01)
+    sess.sleep(0.5)
+    print("  Step: Wait for bootloader handover")
+    sess.wait_for_bootloader()
+
+    print("  Step: DiagnosticSessionControl(PROGRAMMING)")
+    sess.diagnostic_session(0x02)
+    sess.sleep(0.5)
+
+    print("  Step: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
+    comp_fw = sess.read_did(0x0101)
+    if len(comp_fw) < 3:
+        from uds_local.client import UdsError
+        raise UdsError(0x22, 0x00)
+    component_key, fw_type, protocol_ver = comp_fw[0], comp_fw[1], comp_fw[2]
+    print(
+        f"    component_key=0x{component_key:02X}"
+        f"  fw_type=0x{fw_type:02X}"
+        f"  protocol_ver=0x{protocol_ver:02X}"
+    )
+    if fw_type != 0x01:
+        raise ValueError(
+            f"Unexpected FIRMWARE_TYPE 0x{fw_type:02X} at DID 0x0101 (expected 0x01)"
+        )
+
+    seed_level = 0x01 if protocol_ver < 3 else 0x05
+    print(
+        f"  Step: SecurityAccess (idx=0 protocol_ver={protocol_ver}"
+        f" seed_level=0x{seed_level:02X})"
+    )
+    sess.security_access(level_idx=0, seed_level=seed_level)
+
+    # ---- CPU2 / secondary first ----
+    _flash_one_cpu_in_session(
+        sess,
+        module_byte=_PROG1_MODULE_SECONDARY,
+        bhx_file=secondary_bhx,
+        label=f"secondary ({secondary_entry.component})",
+        verify_rev_at_end=False,
+    )
+
+    # ---- CPU1 / primary second ----
+    _flash_one_cpu_in_session(
+        sess,
+        module_byte=_PROG1_MODULE_PRIMARY,
+        bhx_file=primary_bhx,
+        label=f"primary ({primary_entry.component})",
+        verify_rev_at_end=True,
+    )
+
+    print("  Step: ECUReset 11 81 (SPR, no wait) — return to application")
+    sess.ecu_reset_no_wait(0x01)
+    sess.sleep(0.3)
+
+
+def _flash_one_cpu_in_session(
+    sess: "UdsSession",
+    module_byte: int,
+    bhx_file: object,
+    label: str,
+    verify_rev_at_end: bool,
+) -> None:
+    """One CPU's slice of prog 1 — assumes session + auth already established."""
+    print(f"  --- {label} ---")
+    print(f"  Step: netSetTimeout(30) + moduleToProgram(0x{module_byte:02X})")
+    sess.set_timeout(30.0)
+    sess.module_to_program(module_byte)
+
+    print("  Step: RC 0xFF00 initializeEraseModule (P2=30s)")
+    sess.start_tester_present()
+    try:
+        sess.routine_control(_RC_ERASE, b"\x01")
+    finally:
+        sess.stop_tester_present()
+
+    print("  Step: netSetTimeout(1)")
+    sess.set_timeout(1.0)
+
+    for seg_idx, seg in enumerate(bhx_file.segments):
+        print(
+            f"  Step: Transfer SHDR {seg_idx}"
+            f" addr=0x{seg.start_address:08X} size={seg.length} bytes"
+        )
+        max_block_len = sess.request_download(seg.start_address, seg.length)
+        sess.transfer_data(seg.data, max_block_len)
+        sess.request_transfer_exit()
+
+    if verify_rev_at_end:
+        print("  Step: netSetTimeout(4)")
+        sess.set_timeout(4.0)
+    print("  Step: RC 0x0201 checkModuleProgrammedCorrectly")
+    sess.routine_control(_RC_VERIFY_CRC)
+    if verify_rev_at_end:
+        print("  Step: RC 0x0202 checkCorrectComponentAndRev")
+        sess.routine_control(_RC_CHECK_REV)
