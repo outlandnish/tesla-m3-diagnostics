@@ -42,6 +42,7 @@ class FlashContext:
     erase_timeout: float = 3.0 # P2 seconds applied around erase (restored after)
     security_level: int = 0    # security access level index
     protocol_ver: int | None = None  # set by step_verify_comp_fw, consumed by step_security_access
+    expected_fw_type: int = 0x01  # 1 = regular firmware; 2 = bootloader image
 
 
 # Seed level table from DAT_00650e08[idx*16] (uds_security_access at 0x0040c090).
@@ -160,10 +161,10 @@ def step_verify_comp_fw(sess: "UdsSession", ctx: FlashContext) -> None:
         f"  fw_type=0x{fw_type:02X}"
         f"  protocol_ver=0x{protocol_ver:02X}"
     )
-    if fw_type != 0x01:
+    if fw_type != ctx.expected_fw_type:
         raise ValueError(
             f"Unexpected FIRMWARE_TYPE 0x{fw_type:02X} at DID 0x0101 "
-            f"(expected 0x01 — wrong file or wrong ECU?)"
+            f"(expected 0x{ctx.expected_fw_type:02X} — wrong file or wrong ECU?)"
         )
     ctx.protocol_ver = protocol_ver
 
@@ -274,6 +275,12 @@ def step_sleep_500ms(sess: "UdsSession", ctx: FlashContext) -> None:
     time.sleep(0.5)
 
 
+def step_sleep_1000ms(sess: "UdsSession", ctx: FlashContext) -> None:
+    """Wait 1s — used at the start of SCRIPT_BL to let the bu update agent boot."""
+    print("  Step: sleep 1000ms (waiting for bootloader-update agent)")
+    time.sleep(1.0)
+
+
 def step_sleep_5000ms(sess: "UdsSession", ctx: FlashContext) -> None:
     time.sleep(5.0)
 
@@ -317,6 +324,7 @@ class FlashScript:
     module_byte: int = 0x00
     erase_timeout: float = 3.0
     security_level: int = 0
+    expected_fw_type: int = 0x01  # 1 = regular firmware; 2 = bootloader image (for SCRIPT_BL)
 
     def run(self, sess: "UdsSession", bhx_file: object, entry: object) -> None:
         ctx = FlashContext(
@@ -325,6 +333,7 @@ class FlashScript:
             module_byte=self.module_byte,
             erase_timeout=self.erase_timeout,
             security_level=self.security_level,
+            expected_fw_type=self.expected_fw_type,
         )
         for step in self.steps:
             step(sess, ctx)
@@ -713,6 +722,61 @@ SCRIPT_THS = FlashScript(
     erase_timeout=3.0,
 )
 
+# 0x00651300 — bootloader-updater (`*bu` files: parkbu, hvbmsbu, hvpbu)
+# Standard prog-0 flash with fw_type=1 — flashes the update agent into the regular
+# app slot. Decoded from the binary at 0x00651300:
+#   reset(0) + enterBootloader(0)
+#   diagnosticSession(2)  netSetTimeout(3)
+#   varifyCompAndFirmwareType(1)  securityAccess(0)
+#   CALL sub1 [moduleToProgram(0) + erase + transfer + RET]
+#   checkModuleProgrammed  checkCorrectComponentAndRev
+#   reset(0)  halt
+SCRIPT_BL_UPDATER = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,           # expected_fw_type=1 (default)
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+)
+
+# 0x00651340 — bootloader image (`*bl` files: parkbl, hvbmsbl, hvpbl)
+# Runs immediately after SCRIPT_BL_UPDATER without an intervening reset/handover —
+# the bu's trailing reset boots the update agent, and step_sleep_1000ms gives it
+# time to come up. Then DSC + verify(fw_type=2) + auth + erase + transfer +
+# verify + reset against the agent. Decoded from binary at 0x00651340:
+#   sleep(1000ms)
+#   diagnosticSession(2)
+#   varifyCompAndFirmwareType(2)  ← fw_type = 2 (BOOTLOADER)
+#   securityAccess(0)  netSetTimeout(3)
+#   CALL sub1 [moduleToProgram(0) + erase + transfer + RET]
+#   checkModuleProgrammed  checkCorrectComponentAndRev
+#   reset(0)  halt
+SCRIPT_BL = FlashScript(
+    steps=[
+        step_sleep_1000ms,
+        step_programming_session,
+        step_verify_comp_fw,           # expected_fw_type=2 set below
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+    expected_fw_type=0x02,
+)
+
 
 # ---------------------------------------------------------------------------
 # ECU → script map
@@ -814,7 +878,63 @@ ECU_SCRIPT_MAP: dict[str, _Entry] = {
     "bleep":    (SCRIPT_THS, 0x0F),
     "bleepleft":  (SCRIPT_THS, 0x0F),
     "bleepright": (SCRIPT_THS, 0x0F),
+
+    # Bootloader-updater pairs (`*bu` first, then `*bl`) — see _BL_PARENT_NODE.
+    # Module bytes are from the binary's node table (+0x20). They use the
+    # parent ECU's CAN IDs; nothing extra to set up at the transport layer.
+    # Scripts: bu uses 0x00651300, bl uses 0x00651340.
+    "parkbu":  (SCRIPT_BL_UPDATER, 0x12),
+    "parkbl":  (SCRIPT_BL,         0x12),
+    "hvbmsbu": (SCRIPT_BL_UPDATER, 0x02),
+    "hvbmsbl": (SCRIPT_BL,         0x02),
+    "hvpbu":   (SCRIPT_BL_UPDATER, 0x0E),
+    "hvpbl":   (SCRIPT_BL,         0x0E),
+    # NOTE: vcfrontbu uses script 0x00651320 (different — adds OTA-mode CALL
+    # sub4 at the start). vcfrontbl uses 0x00651340 like the others. Neither
+    # is mapped here yet — needs SCRIPT_BL_UPDATER_VCFRONT.
 }
+
+
+# Suffix → parent ECU node name for bootloader nodes. Used by phase 2 to
+# verify that the user's --node argument can drive the bootloader flash, and
+# by display logic to group bu+bl with the parent app entry.
+_BL_PARENT_NODE: dict[str, str] = {
+    "parkbu":  "park",
+    "parkbl":  "park",
+    "hvbmsbu": "hvbms",
+    "hvbmsbl": "hvbms",
+    "hvpbu":   "hvp",
+    "hvpbl":   "hvp",
+}
+
+
+def is_bootloader_ecu_type(ecu_type: str) -> bool:
+    """True if ecu_type names a bootloader updater/image (bu/bl)."""
+    return ecu_type.lower() in _BL_PARENT_NODE
+
+
+def parent_node_for_bootloader(ecu_type: str) -> str | None:
+    """Return the parent ECU node name for a bootloader ecu_type, or None."""
+    return _BL_PARENT_NODE.get(ecu_type.lower())
+
+
+def find_bootloader_entries(selected: list) -> tuple[list, list, list]:
+    """Split `selected` into (bu_entries, bl_entries, app_entries).
+
+    `bu` and `bl` lists hold the bootloader-update entries; `app_entries`
+    is everything else (regular firmware, ramapp, etc.). Order within each
+    list preserves the input order.
+    """
+    bus, bls, apps = [], [], []
+    for e in selected:
+        ecu_type = e.component.lower()
+        if ecu_type.endswith("bu") and ecu_type in _BL_PARENT_NODE:
+            bus.append(e)
+        elif ecu_type.endswith("bl") and ecu_type in _BL_PARENT_NODE:
+            bls.append(e)
+        else:
+            apps.append(e)
+    return bus, bls, apps
 
 
 def get_script(ecu_type: str) -> _Entry:

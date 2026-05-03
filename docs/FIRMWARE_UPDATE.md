@@ -80,6 +80,9 @@ to select the target CPU/region in the bootloader. For single-CPU ECUs this is `
 | `0x006512b0` | vcleftramapp (mod=0x0f)                                                               |
 | `0x006512d0` | opc (mod=0x0c), opcs (mod=0x0c)                                                       |
 | `0x006512e0` | ths (mod=0x0c), swc (mod=0x0c), lumbarl/lumbar/lumbarr (mod=0x0b), bleep* (various)  |
+| `0x00651300` | parkbu (mod=0x12), hvbmsbu (mod=0x02), hvpbu (mod=0x0e) — bootloader updater (`*bu`) |
+| `0x00651320` | vcfrontbu (mod=0x0d) — vcfront-specific bootloader updater (OTA preamble)            |
+| `0x00651340` | parkbl (mod=0x12), hvbmsbl (mod=0x02), hvpbl (mod=0x0e), vcfrontbl (mod=0x0d) — bootloader image (`*bl`) |
 
 ---
 
@@ -515,6 +518,82 @@ CALL sub1  checkModuleProgrammed  checkCorrectComponentAndRev  reset(soft)
 [prog 3]  — CALL sub5 only
 CALL sub5
 ```
+
+---
+
+### `0x00651300` — bootloader-updater (parkbu, hvbmsbu, hvpbu)
+
+The "bu" file (e.g. `parkbu.hex`, `hvpbu.hex`) is a **bootloader update agent**
+that gets installed into the regular application slot first. The script is a
+plain prog-0 flash with `fw_type = 1`:
+
+```
+[prog 0]
+reset(soft) + enterBootloader(0)
+diagnosticSession(2)  netSetTimeout(3)
+varifyCompAndFirmware(1)             ← fw_type = 1 (regular firmware)
+securityAccess(0)
+CALL sub1                             moduleToProgram + erase + transfer
+checkModuleProgrammed  checkCorrectComponentAndRev
+reset(soft)                           ← agent boots after this reset
+```
+
+After this script's trailing reset, the ECU comes back up running the bu agent
+in place of the original application. The CAN endpoint is unchanged — same
+`UDS_<parent>Request` / `<PARENT>_udsResponse` IDs as the parent ECU.
+
+Module bytes (from the binary's node table at +0x20):
+
+| ECU type | Parent | Module byte |
+| --- | --- | --- |
+| `parkbu`  | `park`  | `0x12` |
+| `hvbmsbu` | `hvbms` | `0x02` |
+| `hvpbu`   | `hvp`   | `0x0E` |
+
+`vcfrontbu` uses a different script (`0x00651320`, adds OTA-mode `CALL sub4`
+preamble) — not covered here.
+
+---
+
+### `0x00651340` — bootloader image (parkbl, hvbmsbl, hvpbl, vcfrontbl)
+
+The "bl" file is the actual bootloader being installed. This script runs
+**immediately after** the bu's trailing reset, with no opening reset of its
+own — it relies on the bu agent already booting:
+
+```
+[prog 0]
+sleep(1000ms)                         ← wait for bu agent to come up
+diagnosticSession(2)
+varifyCompAndFirmware(2)             ← fw_type = 2 (BOOTLOADER)
+securityAccess(0)  netSetTimeout(3)
+CALL sub1                             moduleToProgram + erase + transfer
+checkModuleProgrammed  checkCorrectComponentAndRev
+reset(soft)
+```
+
+The bu agent recognizes `fw_type=2` as a bootloader file and erases/rewrites
+the bootloader sector instead of the app slot. After the trailing reset the
+ECU boots into the new bootloader.
+
+Module bytes are the same as the corresponding bu (per parent ECU).
+
+#### Complete bootloader-update sequence
+
+For an ECU with both bu and bl artifacts, the full update flow is:
+
+1. **Flash `*bu`** via script `0x00651300` — replaces the app slot with the
+   update agent. ECU resets and the agent boots.
+2. **Flash `*bl`** via script `0x00651340` — agent erases the bootloader
+   sector and writes the new bootloader. ECU resets into the new bootloader.
+3. **Re-flash the regular `*` (app)** via the parent ECU's normal script —
+   restores the application to the app slot. **Without this step the ECU
+   continues to run the update agent in place of its application** and may
+   appear non-functional. Skipping it is dangerous.
+
+The bu→bl→app order is mandatory. CAN IDs throughout the entire sequence are
+the parent ECU's standard UDS request/response IDs; no separate addressing is
+needed for the bootloader endpoints.
 
 ---
 

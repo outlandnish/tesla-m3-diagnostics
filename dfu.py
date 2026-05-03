@@ -13,7 +13,13 @@ import sys
 from pathlib import Path
 
 import config as _cfg
-from flash_scripts import find_dual_cpu_pair, get_script, run_pcs_dual_cpu
+from flash_scripts import (
+    find_bootloader_entries,
+    find_dual_cpu_pair,
+    get_script,
+    parent_node_for_bootloader,
+    run_pcs_dual_cpu,
+)
 from uds_local.client import UdsSession
 
 _NODES_JSON  = _cfg.NODES_JSON
@@ -122,6 +128,7 @@ def phase2_firmware_selection(
                 except (ValueError, IndexError):
                     _abort(f"Invalid selection: {raw!r}")
 
+    selected = _prompt_bootloader_choice(selected, node_name)
     selected = _prompt_dual_cpu_choice(selected)
 
     for e in selected:
@@ -133,12 +140,62 @@ def phase2_firmware_selection(
     return selected
 
 
+def _prompt_bootloader_choice(selected: list, node_name: str) -> list:
+    """If `selected` includes bootloader updater/image entries, ask whether to flash them.
+
+    Bootloader flashing has real bricking risk — if interrupted, the ECU may not
+    be recoverable without external programmer hardware. Default is **skip**.
+    Apps that are part of a complete BL update package stay in the list either
+    way; only the `*bu` and `*bl` entries are filtered out on a "no" answer.
+    """
+    bus, bls, apps = find_bootloader_entries(selected)
+    if not bus and not bls:
+        return selected
+
+    print("\n  Bootloader updates detected for this firmware package:")
+    for e in bus:
+        print(f"    [{e.component}] {e.dest_name} (bootloader updater — installed into app slot first)")
+    for e in bls:
+        print(f"    [{e.component}] {e.dest_name} (bootloader image — written by the updater agent)")
+
+    print()
+    print("  WARNING: Bootloader flashing can brick the ECU if interrupted.")
+    print("  After bu+bl complete, the regular app slot still holds the")
+    print("  update agent — the regular application MUST be reflashed to")
+    print("  restore normal operation.")
+    if apps:
+        app_summary = ", ".join(e.dest_name for e in apps)
+        print(f"  (Selected app entries that will reflash after BL: {app_summary})")
+    else:
+        print("  (No regular app entries selected — the ECU will be left running")
+        print("   the bootloader update agent. Add the app file to your selection.)")
+
+    while True:
+        raw = input("  Include bootloader updates? [y/N]: ").strip().lower() or "n"
+        if raw in ("n", "no"):
+            print("  → Skipping bootloader files.")
+            return apps
+        if raw in ("y", "yes"):
+            # Sanity: warn if --node arg doesn't match the bootloader's parent
+            for e in bus + bls:
+                parent = parent_node_for_bootloader(e.component)
+                if parent and parent.lower() != node_name.lower():
+                    print(
+                        f"  Warning: --node {node_name} but bootloader entry"
+                        f" {e.component} expects parent {parent!r}"
+                    )
+            print("  → Including bootloader files (bu → bl → app).")
+            # Order: bu first, bl second, then everything else.
+            return bus + bls + apps
+        print(f"  Invalid choice: {raw!r}")
+
+
 def _prompt_dual_cpu_choice(selected: list) -> list:
     """If `selected` contains a PCS-family dual-CPU pair, ask which CPU(s) to flash.
 
-    Returns the (possibly narrowed) entry list. Default (empty input) is "both",
-    which lets phase 4 dispatch to prog 1 (single auth session). Picking just
-    one CPU drops back to prog 0 for that entry.
+    Returns the (possibly narrowed) entry list, preserving any non-pair entries
+    (e.g. bootloader updates). Default (empty input) is "both", which lets phase
+    4 dispatch to prog 1 (single auth session). Picking one CPU drops to prog 0.
     """
     pair = find_dual_cpu_pair(selected)
     if pair is None:
@@ -151,12 +208,27 @@ def _prompt_dual_cpu_choice(selected: list) -> list:
     while True:
         raw = input("  Flash which? [1/2/3]: ").strip() or "3"
         if raw == "1":
-            return [primary]
-        if raw == "2":
-            return [secondary]
-        if raw == "3":
-            return [primary, secondary]
-        print(f"  Invalid choice: {raw!r}")
+            keep_primary, keep_secondary = True, False
+        elif raw == "2":
+            keep_primary, keep_secondary = False, True
+        elif raw == "3":
+            keep_primary, keep_secondary = True, True
+        else:
+            print(f"  Invalid choice: {raw!r}")
+            continue
+        # Preserve original order; drop the unchosen pair member but keep
+        # everything else (e.g. bootloader entries flashed before the apps).
+        result = []
+        for e in selected:
+            if e is primary:
+                if keep_primary:
+                    result.append(e)
+            elif e is secondary:
+                if keep_secondary:
+                    result.append(e)
+            else:
+                result.append(e)
+        return result
 
 
 def _decode_pcs_identity(data: bytes) -> dict | None:
