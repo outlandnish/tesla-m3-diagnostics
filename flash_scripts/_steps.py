@@ -1,0 +1,344 @@
+"""Step functions — atoms composed into FlashScript instances.
+
+Each step is `(sess, ctx) -> None`. Steps mutate `ctx` to pass state forward
+(e.g. `step_verify_comp_fw` stashes `protocol_ver`) and call methods on `sess`
+to drive the underlying UDS transport.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING
+
+from ._constants import (
+    _BOARD_INFO_DIDS,
+    _RC_CHECK_REV,
+    _RC_ERASE,
+    _RC_VERIFY_CRC,
+    _SECURITY_SEED_LEVEL,
+    FLASH_COUNT_LIMITS,
+)
+from ._context import FlashContext
+
+if TYPE_CHECKING:
+    from uds_local.client import UdsSession
+
+
+# ---------------------------------------------------------------------------
+# Reset / bootloader handover
+# ---------------------------------------------------------------------------
+
+def step_soft_reset(sess: "UdsSession", ctx: FlashContext) -> None:
+    """ECUReset `11 81` (subfunction 0x01 with SPR set) — fire-and-forget.
+
+    Matches VM `reset(0)`. Used both as the opening reset that hands control to
+    the bootloader (must be followed by `step_wait_for_bootloader`) and as the
+    trailing reset that returns control to the application (no handover wait
+    needed).
+    """
+    print("  Step: ECUReset 11 81 (SPR, no wait)")
+    sess.ecu_reset_no_wait(0x01)
+    sess.sleep(0.5)
+
+
+def step_wait_for_bootloader(sess: "UdsSession", ctx: FlashContext) -> None:
+    """Wait for the bootloader to take over after a reset (VM `enterBootloader(0)`).
+
+    Required after the opening reset of every flash script. Without this, the
+    application services DSC / RDBI / SecurityAccess (they all succeed there)
+    but `WDBI 0x0102` (`moduleToProgram`) is bootloader-only and gets rejected.
+    """
+    print("  Step: Wait for bootloader handover")
+    sess.wait_for_bootloader()
+
+
+def step_hard_reset(sess: "UdsSession", ctx: FlashContext) -> None:
+    """ECUReset hard reset, wait for response (opcode 8 operand 0)."""
+    print("  Step: ECUReset (hard reset, wait for response)")
+    sess.ecu_reset(0x01)
+
+
+def step_hard_reset_with_retries(sess: "UdsSession", ctx: FlashContext) -> None:
+    """ECUReset hard reset with 3 retries + 10 s delay each (opcode 8 operand 2)."""
+    print("  Step: ECUReset (hard reset, 3 retries + 10 s delay)")
+    for attempt in range(3):
+        try:
+            sess.ecu_reset(0x01)
+            return
+        except Exception:
+            if attempt < 2:
+                print(f"    Reset attempt {attempt + 1} failed, retrying in 10 s")
+                time.sleep(10)
+    sess.ecu_reset(0x01)
+
+
+# ---------------------------------------------------------------------------
+# Identification / session / auth
+# ---------------------------------------------------------------------------
+
+def step_board_info(sess: "UdsSession", ctx: FlashContext) -> None:
+    """Read board part/serial DIDs — logged only, failure does not abort."""
+    print("  Step: Board part/serial DIDs (0xF012-0xF015)")
+    for did in _BOARD_INFO_DIDS:
+        try:
+            data = sess.read_did(did)
+            print(
+                f"    0x{did:04X}: "
+                f"{data.decode('ascii', errors='replace').rstrip(chr(0))!r}"
+            )
+        except Exception:
+            pass
+
+
+def step_start_tester_present(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: TesterPresent keepalive start")
+    sess.start_tester_present()
+
+
+def step_stop_tester_present(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: TesterPresent keepalive stop")
+    sess.stop_tester_present()
+
+
+def step_programming_session(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: DiagnosticSessionControl(PROGRAMMING)")
+    sess.diagnostic_session(0x02)
+    sess.sleep(0.5)  # ECU reboots into bootloader after programming session
+
+
+def step_verify_comp_fw(sess: "UdsSession", ctx: FlashContext) -> None:
+    """RDBI 0x0101 — validate fw_type, stash protocol_ver on the context.
+
+    Wire byte order (per ODJ + VM `uds_varify_comp_and_firmware`):
+      byte[0] = COMPONENT_KEY (informational)
+      byte[1] = FIRMWARE_TYPE — must equal ctx.expected_fw_type (1 for regular
+                firmware, 2 for SCRIPT_BL bootloader image)
+      byte[2] = BOOTLOADER_PROTOCOL_VERSION — drives security level branching
+    """
+    print("  Step: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
+    comp_fw = sess.read_did(0x0101)
+    if len(comp_fw) < 3:
+        from uds_local.client import UdsError
+        raise UdsError(0x22, 0x00)
+    component_key = comp_fw[0]
+    fw_type = comp_fw[1]
+    protocol_ver = comp_fw[2]
+    print(
+        f"    component_key=0x{component_key:02X}"
+        f"  fw_type=0x{fw_type:02X}"
+        f"  protocol_ver=0x{protocol_ver:02X}"
+    )
+    if fw_type != ctx.expected_fw_type:
+        raise ValueError(
+            f"Unexpected FIRMWARE_TYPE 0x{fw_type:02X} at DID 0x0101 "
+            f"(expected 0x{ctx.expected_fw_type:02X} — wrong file or wrong ECU?)"
+        )
+    ctx.protocol_ver = protocol_ver
+
+
+def step_security_access(sess: "UdsSession", ctx: FlashContext) -> None:
+    """SecurityAccess with the seed level chosen from protocol_ver + idx."""
+    idx = ctx.security_level
+    base_level = _SECURITY_SEED_LEVEL.get(idx, idx * 2 + 1)
+    if idx == 0 and ctx.protocol_ver is not None and ctx.protocol_ver < 3:
+        seed_level = 0x01  # legacy-protocol override
+    else:
+        seed_level = base_level
+    print(
+        f"  Step: SecurityAccess (idx={idx} protocol_ver={ctx.protocol_ver}"
+        f" seed_level=0x{seed_level:02X})"
+    )
+    sess.security_access(level_idx=idx, seed_level=seed_level)
+
+
+# ---------------------------------------------------------------------------
+# Erase / transfer / verify
+# ---------------------------------------------------------------------------
+
+def step_module_to_program(sess: "UdsSession", ctx: FlashContext) -> None:
+    """Set extended timeout then select CPU/flash region (WDBI 0x0102).
+
+    netSetTimeout must precede moduleToProgram per the flash protocol.
+    """
+    print(f"  Step: moduleToProgram (module=0x{ctx.module_byte:02X})")
+    sess.set_timeout(ctx.erase_timeout)
+    sess.module_to_program(ctx.module_byte)
+
+
+def step_erase(sess: "UdsSession", ctx: FlashContext) -> None:
+    """RC 0xFF00 initializeEraseModule (timeout already set by step_module_to_program)."""
+    print(f"  Step: RC 0xFF00 initializeEraseModule (P2={ctx.erase_timeout}s)")
+    sess.start_tester_present()
+    try:
+        sess.routine_control(_RC_ERASE, b"\x01")
+    finally:
+        sess.set_timeout(3.0)
+        sess.stop_tester_present()
+
+
+def step_transfer_loop(sess: "UdsSession", ctx: FlashContext) -> None:
+    """RequestDownload + TransferData + RequestTransferExit for each SHDR."""
+    for seg_idx, seg in enumerate(ctx.bhx_file.segments):
+        print(
+            f"  Step: Transfer SHDR {seg_idx}"
+            f" addr=0x{seg.start_address:08X} size={seg.length} bytes"
+        )
+        max_block_len = sess.request_download(seg.start_address, seg.length)
+        print(f"    RequestDownload → maxBlockLen={max_block_len}")
+        chunk_size = max_block_len - 2
+        print(
+            f"    TransferData ({seg.length} bytes, {chunk_size}-byte chunks)"
+        )
+        sess.transfer_data(seg.data, max_block_len)
+        print("    RequestTransferExit")
+        sess.request_transfer_exit()
+
+
+def step_transfer_loop_inter_shdr(sess: "UdsSession", ctx: FlashContext) -> None:
+    """Transfer loop with inter-SHDR re-auth + re-erase (GHDR v2 ramAppPayload)."""
+    segments = ctx.bhx_file.segments
+    for seg_idx, seg in enumerate(segments):
+        print(
+            f"  Step: Transfer SHDR {seg_idx}"
+            f" addr=0x{seg.start_address:08X} size={seg.length} bytes"
+        )
+        max_block_len = sess.request_download(seg.start_address, seg.length)
+        print(f"    RequestDownload → maxBlockLen={max_block_len}")
+        sess.transfer_data(seg.data, max_block_len)
+        print("    RequestTransferExit")
+        sess.request_transfer_exit()
+
+        is_last = seg_idx == len(segments) - 1
+        if not is_last:
+            print("    [inter-SHDR] RC 0x0201 checkModuleProgrammedCorrectly")
+            sess.routine_control(_RC_VERIFY_CRC)
+            print("    [inter-SHDR] RC 0x0202 checkCorrectComponentAndRev")
+            sess.routine_control(_RC_CHECK_REV)
+            print("    [inter-SHDR] DiagnosticSessionControl(PROGRAMMING)")
+            sess.diagnostic_session(0x02)
+            print("    [inter-SHDR] SecurityAccess")
+            sess.security_access(ctx.security_level)
+            print("    [inter-SHDR] moduleToProgram")
+            sess.diagnostic_session(0x02)
+            print("    [inter-SHDR] RC 0xFF00 initializeEraseModule")
+            sess.routine_control(_RC_ERASE, b"\x01")
+
+
+def step_verify_crc(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: RC 0x0201 checkModuleProgrammedCorrectly")
+    sess.routine_control(_RC_VERIFY_CRC)
+
+
+def step_check_rev(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: RC 0x0202 checkCorrectComponentAndRev")
+    sess.routine_control(_RC_CHECK_REV)
+
+
+# ---------------------------------------------------------------------------
+# Sleeps
+# ---------------------------------------------------------------------------
+
+def step_sleep_100ms(sess: "UdsSession", ctx: FlashContext) -> None:
+    time.sleep(0.1)
+
+
+def step_sleep_300ms(sess: "UdsSession", ctx: FlashContext) -> None:
+    time.sleep(0.3)
+
+
+def step_sleep_500ms(sess: "UdsSession", ctx: FlashContext) -> None:
+    time.sleep(0.5)
+
+
+def step_sleep_1000ms(sess: "UdsSession", ctx: FlashContext) -> None:
+    """Wait 1s — used at the start of SCRIPT_BL to let the bu update agent boot."""
+    print("  Step: sleep 1000ms (waiting for bootloader-update agent)")
+    time.sleep(1.0)
+
+
+def step_sleep_5000ms(sess: "UdsSession", ctx: FlashContext) -> None:
+    time.sleep(5.0)
+
+
+# ---------------------------------------------------------------------------
+# Flash-count gating + DTC clear
+# ---------------------------------------------------------------------------
+
+def step_check_flash_count_0(sess: "UdsSession", ctx: FlashContext) -> None:
+    sess.check_flash_count(FLASH_COUNT_LIMITS[0])
+
+
+def step_check_flash_count_1(sess: "UdsSession", ctx: FlashContext) -> None:
+    sess.check_flash_count(FLASH_COUNT_LIMITS[1])
+
+
+def step_check_flash_count_2(sess: "UdsSession", ctx: FlashContext) -> None:
+    sess.check_flash_count(FLASH_COUNT_LIMITS[2])
+
+
+def step_clear_dtc(sess: "UdsSession", ctx: FlashContext) -> None:
+    print("  Step: ClearDiagnosticInformation")
+    sess.clear_dtc()
+
+
+# ---------------------------------------------------------------------------
+# Vendor preflights / OTA-mode prep
+# ---------------------------------------------------------------------------
+
+def step_vendor_preflight(sess: "UdsSession", ctx: FlashContext) -> None:
+    """RC 0x0601 — vcleft/vcleftramapp vendor pre-flash routine."""
+    print("  Step: routineControl 0x0601 (vendor pre-flash)")
+    sess.vendor_preflight_routine()
+
+
+def step_vcright_ota_prep(sess: "UdsSession", ctx: FlashContext) -> None:
+    """sub4 (`0x006513a0`) — VCRIGHT-side OTA prep before flashing VCFRONT bu.
+
+    Opens a transient UDS session to VCRIGHT (CAN IDs 0x608/0x609) on the
+    same physical CAN channel as the parent VCFRONT session, runs:
+
+        diagnosticSession(3)            extended session
+        setSecurityAccessLevel(3)       internal — sets the override gate
+        securityAccess(0)               seed level 0x05 (the override-protected path)
+        VCWaitForOTAMode(0)             RC 0x540 polling, response[0] must == 2
+        vcFrontLockoutIOControl(1)      IOCBI 0x218 controlParam=3, byte 1
+        restoreUdsContext(0)            (handled by closing the session)
+
+    then closes the VCRIGHT session.
+
+    **Operational prerequisite:** VCWaitForOTAMode requires the vehicle to be
+    actively in OTA state — initiated by the vehicle's overall state machine,
+    not by this tool. On a bench setup this will time out.
+    """
+    if ctx.channel is None:
+        raise RuntimeError(
+            "step_vcright_ota_prep needs a CAN channel on FlashContext. "
+            "Pass it via FlashScript.run(channel=..., interface=...)."
+        )
+
+    # Local imports to avoid pulling these into the module-level dependency
+    # graph (keeps unit tests light).
+    import config as _cfg
+    from uds_local.client import UdsSession
+    from uds_local.node_config import load_node_config
+
+    print("  Step: VCRIGHT-side OTA prep (sub4) — opening transient session")
+    vcright_cfg = load_node_config(
+        "vcright", _cfg.NODES_JSON, _cfg.ETH_COMPACT, _cfg.ODJ_DIR
+    )
+
+    interface = ctx.interface or "socketcan"
+    with UdsSession(vcright_cfg, ctx.channel, interface=interface) as vsess:
+        print("    [VCRIGHT] DiagnosticSessionControl(EXTENDED 0x03)")
+        vsess.diagnostic_session(0x03)
+        # setSecurityAccessLevel(3) is internal: it sets context+0x02 = 3 so
+        # the protocol_ver < 3 override does NOT fire when securityAccess(0)
+        # runs. We replicate that by passing seed_level=0x05 explicitly — the
+        # table value at idx 0 — bypassing the protocol_ver branch altogether.
+        print("    [VCRIGHT] SecurityAccess (idx=0, forced seed_level=0x05)")
+        vsess.security_access(level_idx=0, seed_level=0x05)
+        print("    [VCRIGHT] VCWaitForOTAMode (RC 0x0540 poll for response[0]==2)")
+        vsess.wait_for_ota_mode()
+        print("    [VCRIGHT] IOCBI 0x0218 shortTermAdjustment, control byte 0x01")
+        vsess.io_control_short_term_adjustment(0x0218, 1)
+        print("    [VCRIGHT] closing transient session (restoreUdsContext)")

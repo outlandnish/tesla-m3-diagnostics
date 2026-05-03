@@ -1,0 +1,494 @@
+"""FlashScript instances — one per distinct hashpicker_sim VM script.
+
+Address comments reference the script slot in the binary at
+`hashpicker_sim` (image base `0x00400000`). See `docs/FIRMWARE_UPDATE.md`
+for the decoded VM bytecode that each FlashScript mirrors.
+"""
+
+from ._context import FlashScript
+from ._steps import (
+    step_check_flash_count_0,
+    step_check_flash_count_1,
+    step_check_flash_count_2,
+    step_check_rev,
+    step_clear_dtc,
+    step_erase,
+    step_hard_reset_with_retries,
+    step_module_to_program,
+    step_programming_session,
+    step_security_access,
+    step_sleep_100ms,
+    step_sleep_300ms,
+    step_sleep_500ms,
+    step_sleep_1000ms,
+    step_sleep_5000ms,
+    step_soft_reset,
+    step_transfer_loop,
+    step_vcright_ota_prep,
+    step_vendor_preflight,
+    step_verify_comp_fw,
+    step_verify_crc,
+    step_wait_for_bootloader,
+    step_board_info,
+)
+
+
+# 0x00650fa0 — gtw3: stub only, no flash sequence
+SCRIPT_GTW3 = FlashScript(steps=[])
+
+# 0x00650fb0 — Standard: hvbms, cp, epas3p/s, epbl/r, hvp, ocs1p, sccmk, vcsec, tas
+SCRIPT_STANDARD = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_board_info,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+        step_sleep_300ms,
+    ],
+)
+
+# 0x00651000 — vcfront / ibstcal (prog 1: standard flash only)
+SCRIPT_VCFRONT = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+        step_sleep_500ms,
+    ],
+)
+
+# 0x00651030 — vcright (prog 0: standard flash)
+SCRIPT_VCRIGHT = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+        step_sleep_500ms,
+    ],
+)
+
+# 0x00651050 — vcleft (pre-flash vendor routine)
+SCRIPT_VCLEFT = FlashScript(
+    steps=[
+        step_vendor_preflight,
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+        step_sleep_500ms,
+    ],
+)
+
+# 0x00651070 — pcs/pcscpu2/di/dis/pm/pms (prog 0: extended erase timeout)
+# module_byte is set per-entry from ECU_SCRIPT_MAP; erase_timeout=5s per doc
+SCRIPT_PCS = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_board_info,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+        step_sleep_300ms,
+    ],
+    erase_timeout=5.0,
+)
+
+# 0x006510d0 — park (prog 0: extended erase timeout, 5 s post-reset sleep)
+SCRIPT_PARK = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+        step_sleep_5000ms,
+    ],
+    erase_timeout=1.0,
+)
+
+# 0x006510f0 — park / aps (prog 0)
+SCRIPT_APS = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_board_info,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=1.0,
+)
+
+# 0x00651110 — RAM app scripts: vcleftramapp, vcrightramapp, vcfrontramapp,
+#              vcsecrumapp, sccmksub (prog 0: no boardPartSerialGet)
+SCRIPT_RAMAPP = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+)
+
+# 0x00651140 — ibst (prog 0: flash count check + DTC clear + security level 3)
+SCRIPT_IBST = FlashScript(
+    steps=[
+        step_check_flash_count_2,
+        step_clear_dtc,
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_board_info,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    security_level=3,
+    erase_timeout=4.0,
+)
+
+# 0x00651170 — espcal / rcmcal (calibration flash, security level 3)
+SCRIPT_ESPCAL = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    security_level=3,
+    erase_timeout=4.0,
+)
+
+# 0x00651190 — esp (flash count check + security level 3)
+SCRIPT_ESP = FlashScript(
+    steps=[
+        step_check_flash_count_1,
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_soft_reset,
+    ],
+    security_level=3,
+)
+
+# 0x006511b0 — ibstcal bootloader path (hard reset with retries)
+SCRIPT_IBSTCAL = FlashScript(
+    steps=[
+        step_check_flash_count_0,
+        step_hard_reset_with_retries,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_hard_reset_with_retries,
+        step_sleep_100ms,
+    ],
+    security_level=3,
+    erase_timeout=4.0,
+)
+
+# 0x006511d0 — rcm (Pektron: flash count + hard reset + explicit erase)
+SCRIPT_RCM = FlashScript(
+    steps=[
+        step_check_flash_count_0,
+        step_hard_reset_with_retries,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_sleep_100ms,
+        step_hard_reset_with_retries,
+    ],
+    security_level=3,
+    erase_timeout=4.0,
+)
+
+# 0x006511f0 — tpms (security level 4 — baolong_hash)
+SCRIPT_TPMS = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    security_level=4,
+    erase_timeout=3.0,
+)
+
+# 0x00651230 — cmp (security level 7 — pektron-style)
+SCRIPT_CMP = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_board_info,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    security_level=7,
+)
+
+# 0x00651270 — ptc (non-standard erase, 10 s timeout)
+SCRIPT_PTC = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=10.0,
+)
+
+# 0x00651290 — vcright/vcfront/vcsec ramapp, bleepcenter (prog 0)
+SCRIPT_RAMAPP_ALT = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+    ],
+)
+
+# 0x006512b0 — vcleftramapp (prog 0: pre-flash vendor routine)
+SCRIPT_VCLEFTRAMAPP = FlashScript(
+    steps=[
+        step_vendor_preflight,
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+    ],
+    erase_timeout=5.0,
+)
+
+# 0x006512d0 — opc / opcs (prog 1: standard flash, 3 s timeout)
+SCRIPT_OPC = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+)
+
+# 0x006512e0 — ths / swc / lumbar* / bleep* (prog 2: standard flash, 3 s timeout)
+SCRIPT_THS = FlashScript(
+    steps=[
+        step_sleep_500ms,
+        step_programming_session,
+        step_verify_comp_fw,
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+)
+
+# 0x00651300 — bootloader-updater (`*bu` files: parkbu, hvbmsbu, hvpbu)
+# Standard prog-0 flash with fw_type=1 — flashes the update agent into the regular
+# app slot. Decoded from the binary at 0x00651300:
+#   reset(0) + enterBootloader(0)
+#   diagnosticSession(2)  netSetTimeout(3)
+#   varifyCompAndFirmwareType(1)  securityAccess(0)
+#   CALL sub1 [moduleToProgram(0) + erase + transfer + RET]
+#   checkModuleProgrammed  checkCorrectComponentAndRev
+#   reset(0)  halt
+SCRIPT_BL_UPDATER = FlashScript(
+    steps=[
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,           # expected_fw_type=1 (default)
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+)
+
+# 0x00651340 — bootloader image (`*bl` files: parkbl, hvbmsbl, hvpbl)
+# Runs immediately after SCRIPT_BL_UPDATER without an intervening reset/handover —
+# the bu's trailing reset boots the update agent, and step_sleep_1000ms gives it
+# time to come up. Then DSC + verify(fw_type=2) + auth + erase + transfer +
+# verify + reset against the agent. Decoded from binary at 0x00651340:
+#   sleep(1000ms)
+#   diagnosticSession(2)
+#   varifyCompAndFirmwareType(2)  ← fw_type = 2 (BOOTLOADER)
+#   securityAccess(0)  netSetTimeout(3)
+#   CALL sub1 [moduleToProgram(0) + erase + transfer + RET]
+#   checkModuleProgrammed  checkCorrectComponentAndRev
+#   reset(0)  halt
+SCRIPT_BL = FlashScript(
+    steps=[
+        step_sleep_1000ms,
+        step_programming_session,
+        step_verify_comp_fw,           # expected_fw_type=2 set below
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+    expected_fw_type=0x02,
+)
+
+# 0x00651320 — vcfront-specific bootloader-updater (`vcfrontbu`)
+# Same as SCRIPT_BL_UPDATER but with a `CALL sub4` preamble that opens a
+# transient session to VCRIGHT, runs OTA-mode prep + IOCBI lockout, and
+# closes it. Used because VCFRONT cannot enter the bootloader-update flow
+# without VCRIGHT being held in a coordinated OTA state first.
+#
+# Requires: VCRIGHT reachable on the same CAN channel; vehicle actively in
+# OTA state (RC 0x0540 must return response[0]==2).
+SCRIPT_BL_UPDATER_VCFRONT = FlashScript(
+    steps=[
+        step_vcright_ota_prep,         # ← sub4 (VCRIGHT detour)
+        step_soft_reset,
+        step_wait_for_bootloader,
+        step_programming_session,
+        step_verify_comp_fw,           # expected_fw_type=1 (default)
+        step_security_access,
+        step_module_to_program,
+        step_erase,
+        step_transfer_loop,
+        step_verify_crc,
+        step_check_rev,
+        step_soft_reset,
+    ],
+    erase_timeout=3.0,
+)

@@ -1,0 +1,169 @@
+"""ECU_SCRIPT_MAP — lookup from `ecu_type` (lowercase) to (FlashScript, module_byte).
+
+Keys are lowercase ecu_type values from `signed_metadata_map.tsv`. Module
+bytes are sourced from the binary's node table at offset `+0x20` per
+docs/FIRMWARE_UPDATE.md.
+"""
+
+from ._context import FlashScript
+from ._scripts import (
+    SCRIPT_APS,
+    SCRIPT_BL,
+    SCRIPT_BL_UPDATER,
+    SCRIPT_BL_UPDATER_VCFRONT,
+    SCRIPT_CMP,
+    SCRIPT_ESP,
+    SCRIPT_ESPCAL,
+    SCRIPT_GTW3,
+    SCRIPT_IBST,
+    SCRIPT_IBSTCAL,
+    SCRIPT_OPC,
+    SCRIPT_PARK,
+    SCRIPT_PCS,
+    SCRIPT_PTC,
+    SCRIPT_RAMAPP,
+    SCRIPT_RAMAPP_ALT,
+    SCRIPT_RCM,
+    SCRIPT_STANDARD,
+    SCRIPT_THS,
+    SCRIPT_TPMS,
+    SCRIPT_VCFRONT,
+    SCRIPT_VCLEFT,
+    SCRIPT_VCLEFTRAMAPP,
+    SCRIPT_VCRIGHT,
+)
+
+# (FlashScript, module_byte)
+_Entry = tuple[FlashScript, int]
+
+ECU_SCRIPT_MAP: dict[str, _Entry] = {
+    # gtw3 — stub
+    "gtw3": (SCRIPT_GTW3, 0x00),
+
+    # Standard script (0x00650fb0)
+    # NOTE: module bytes here are from the binary's node table at +0x20.
+    # Earlier versions of this map had `0x00` for all of these, which works
+    # only because most single-CPU bootloaders ignore the operand. The
+    # binary's authoritative values are below.
+    "hvbms":  (SCRIPT_STANDARD, 0x02),
+    "cp":     (SCRIPT_STANDARD, 0x05),
+    "epas3p": (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "epas3s": (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "epbl":   (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "epbr":   (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "hvp":    (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "ocs1p":  (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "sccmk":  (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    "vcsec":  (SCRIPT_STANDARD, 0x1B),
+    "tas":    (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+
+    # CP PLC modem subcomponents — flashed via the CP MCU's bootloader using the
+    # same SCRIPT_STANDARD as the regular CP app. Module byte is 0x05 (CP MCU);
+    # the CP MCU's bootloader routes the .hex file contents to the PLC modem
+    # over its internal interconnect based on each record's address range.
+    # `cpPlcFw` is the modem firmware, `cpPlcPib` is the modem PIB
+    # (Personality Identifier Block — modem config).
+    "cpplcfw":  (SCRIPT_STANDARD, 0x05),
+    "cpplcpib": (SCRIPT_STANDARD, 0x05),
+
+    # vcfront / ibstcal (0x00651000)
+    "vcfront": (SCRIPT_VCFRONT, 0x00),
+    "ibstcal": (SCRIPT_IBSTCAL, 0x00),
+
+    # vcright (0x00651030)
+    "vcright": (SCRIPT_VCRIGHT, 0x00),
+
+    # vcleft (0x00651050)
+    "vcleft": (SCRIPT_VCLEFT, 0x00),
+
+    # pcs/pcscpu2/di/dis/pm/pms (0x00651070)
+    "pcs":     (SCRIPT_PCS, 0x00),
+    "pcscpu2": (SCRIPT_PCS, 0x0C),
+    "pm":      (SCRIPT_PCS, 0x00),
+    "pms":     (SCRIPT_PCS, 0x00),
+    "di":      (SCRIPT_PCS, 0x0C),
+    "dis":     (SCRIPT_PCS, 0x0C),
+
+    # park (0x006510d0)
+    "park": (SCRIPT_PARK, 0x00),
+
+    # aps (0x006510f0)
+    "aps": (SCRIPT_APS, 0x00),
+
+    # RAM app scripts (0x00651110)
+    "vcleftramapp":  (SCRIPT_RAMAPP, 0x06),
+    "vcrightramapp": (SCRIPT_RAMAPP, 0x0F),
+    "vcfrontramapp": (SCRIPT_RAMAPP, 0x0F),
+    "vcsecrumapp":   (SCRIPT_RAMAPP, 0x0F),
+    "sccmksub":      (SCRIPT_RAMAPP, 0x06),
+
+    # ibst (0x00651140)
+    "ibst": (SCRIPT_IBST, 0x00),
+
+    # espcal / rcmcal (0x00651170)
+    "espcal": (SCRIPT_ESPCAL, 0x07),
+    "rcmcal": (SCRIPT_ESPCAL, 0x07),
+
+    # esp (0x00651190)
+    "esp": (SCRIPT_ESP, 0x00),
+
+    # rcm (0x006511d0)
+    "rcm": (SCRIPT_RCM, 0x00),
+
+    # tpms (0x006511f0)
+    "tpms": (SCRIPT_TPMS, 0x00),
+
+    # cmp (0x00651230)
+    "cmp": (SCRIPT_CMP, 0x00),
+
+    # ptc (0x00651270)
+    "ptc": (SCRIPT_PTC, 0x00),
+
+    # vcright/vcfront/vcsec ramapp, bleepcenter (0x00651290)
+    "bleepcenter": (SCRIPT_RAMAPP_ALT, 0x0F),
+
+    # vcleftramapp alt (0x006512b0)
+    # (same key as RAMAPP above; 0x006512b0 is the prog-0 path with vendor preflight)
+    # Differentiated by ecu_type suffix in TSV when needed; default to VCLEFTRAMAPP.
+
+    # opc / opcs (0x006512d0)
+    "opc":  (SCRIPT_OPC, 0x0C),
+    "opcs": (SCRIPT_OPC, 0x0C),
+
+    # ths / swc / lumbar* / bleep* (0x006512e0)
+    "ths":      (SCRIPT_THS, 0x0C),
+    "swc":      (SCRIPT_THS, 0x0C),
+    "lumbarl":  (SCRIPT_THS, 0x0B),
+    "lumbar":   (SCRIPT_THS, 0x0B),
+    "lumbarr":  (SCRIPT_THS, 0x0B),
+    "bleep":    (SCRIPT_THS, 0x0F),
+    "bleepleft":  (SCRIPT_THS, 0x0F),
+    "bleepright": (SCRIPT_THS, 0x0F),
+
+    # Bootloader-updater pairs (`*bu` first, then `*bl`) — see _BL_PARENT_NODE
+    # in flash_scripts._groups. Module bytes are from the binary's node table
+    # (+0x20). They use the parent ECU's CAN IDs; nothing extra to set up at
+    # the transport layer. Scripts: bu uses 0x00651300, bl uses 0x00651340.
+    "parkbu":    (SCRIPT_BL_UPDATER,         0x12),
+    "parkbl":    (SCRIPT_BL,                 0x12),
+    "hvbmsbu":   (SCRIPT_BL_UPDATER,         0x02),
+    "hvbmsbl":   (SCRIPT_BL,                 0x02),
+    "hvpbu":     (SCRIPT_BL_UPDATER,         0x0E),
+    "hvpbl":     (SCRIPT_BL,                 0x0E),
+    "vcfrontbu": (SCRIPT_BL_UPDATER_VCFRONT, 0x0D),
+    "vcfrontbl": (SCRIPT_BL,                 0x0D),
+}
+
+
+def get_script(ecu_type: str) -> _Entry:
+    """Look up (FlashScript, module_byte) for an ecu_type name.
+
+    Raises KeyError with a helpful message if the type is unknown.
+    """
+    key = ecu_type.lower()
+    if key not in ECU_SCRIPT_MAP:
+        raise KeyError(
+            f"No flash script defined for ecu_type {ecu_type!r}. "
+            f"Known types: {sorted(ECU_SCRIPT_MAP)}"
+        )
+    return ECU_SCRIPT_MAP[key]
