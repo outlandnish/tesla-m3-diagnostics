@@ -41,30 +41,30 @@ ECU_SCRIPT_MAP: dict[str, _Entry] = {
     "gtw3": (SCRIPT_GTW3, 0x00),
 
     # Standard script (0x00650fb0)
-    # NOTE: module bytes here are from the binary's node table at +0x20.
-    # Earlier versions of this map had `0x00` for all of these, which works
-    # only because most single-CPU bootloaders ignore the operand. The
-    # binary's authoritative values are below.
-    "hvbms":  (SCRIPT_STANDARD, 0x02),
-    "cp":     (SCRIPT_STANDARD, 0x05),
-    "epas3p": (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
-    "epas3s": (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
-    "epbl":   (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
-    "epbr":   (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
-    "hvp":    (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
-    "ocs1p":  (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
-    "sccmk":  (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
-    "vcsec":  (SCRIPT_STANDARD, 0x1B),
-    "tas":    (SCRIPT_STANDARD, 0x00),  # TODO: verify against binary
+    # All these ECUs have module byte 0x00 at +0x20 in the binary's node table.
+    # (The byte at +0x1C is a `node_id` used by `udsContextSwitch`, not the
+    # module byte — earlier versions of this comment had them confused.)
+    "hvbms":  (SCRIPT_STANDARD, 0x00),
+    "cp":     (SCRIPT_STANDARD, 0x00),
+    "epas3p": (SCRIPT_STANDARD, 0x00),
+    "epas3s": (SCRIPT_STANDARD, 0x00),
+    "epbl":   (SCRIPT_STANDARD, 0x00),
+    "epbr":   (SCRIPT_STANDARD, 0x00),
+    "hvp":    (SCRIPT_STANDARD, 0x00),
+    "ocs1p":  (SCRIPT_STANDARD, 0x00),
+    "sccmk":  (SCRIPT_STANDARD, 0x00),
+    "vcsec":  (SCRIPT_STANDARD, 0x00),
+    "tas":    (SCRIPT_STANDARD, 0x00),
 
     # CP PLC modem subcomponents — flashed via the CP MCU's bootloader using the
-    # same SCRIPT_STANDARD as the regular CP app. Module byte is 0x05 (CP MCU);
-    # the CP MCU's bootloader routes the .hex file contents to the PLC modem
-    # over its internal interconnect based on each record's address range.
+    # same SCRIPT_STANDARD as the regular CP app. Module byte is 0x00 (the CP
+    # MCU's bootloader routes the .hex file contents to the PLC modem over its
+    # internal interconnect based on each record's address range — no module
+    # byte differentiates them at the wire level).
     # `cpPlcFw` is the modem firmware, `cpPlcPib` is the modem PIB
     # (Personality Identifier Block — modem config).
-    "cpplcfw":  (SCRIPT_STANDARD, 0x05),
-    "cpplcpib": (SCRIPT_STANDARD, 0x05),
+    "cpplcfw":  (SCRIPT_STANDARD, 0x00),
+    "cpplcpib": (SCRIPT_STANDARD, 0x00),
 
     # vcfront / ibstcal (0x00651000)
     "vcfront": (SCRIPT_VCFRONT, 0x00),
@@ -141,17 +141,19 @@ ECU_SCRIPT_MAP: dict[str, _Entry] = {
     "bleepright": (SCRIPT_THS, 0x0F),
 
     # Bootloader-updater pairs (`*bu` first, then `*bl`) — see _BL_PARENT_NODE
-    # in flash_scripts._groups. Module bytes are from the binary's node table
-    # (+0x20). They use the parent ECU's CAN IDs; nothing extra to set up at
-    # the transport layer. Scripts: bu uses 0x00651300, bl uses 0x00651340.
-    "parkbu":    (SCRIPT_BL_UPDATER,         0x12),
-    "parkbl":    (SCRIPT_BL,                 0x12),
-    "hvbmsbu":   (SCRIPT_BL_UPDATER,         0x02),
-    "hvbmsbl":   (SCRIPT_BL,                 0x02),
-    "hvpbu":     (SCRIPT_BL_UPDATER,         0x0E),
-    "hvpbl":     (SCRIPT_BL,                 0x0E),
-    "vcfrontbu": (SCRIPT_BL_UPDATER_VCFRONT, 0x0D),
-    "vcfrontbl": (SCRIPT_BL,                 0x0D),
+    # in flash_scripts._groups. They use the parent ECU's CAN IDs; nothing
+    # extra to set up at the transport layer. Module byte at +0x20 in the
+    # binary is 0x00 for all of these. Scripts: bu uses 0x00651300, bl uses
+    # 0x00651340. (The byte at +0x1C is the parent ECU's node_id, not the
+    # module byte.)
+    "parkbu":    (SCRIPT_BL_UPDATER,         0x00),
+    "parkbl":    (SCRIPT_BL,                 0x00),
+    "hvbmsbu":   (SCRIPT_BL_UPDATER,         0x00),
+    "hvbmsbl":   (SCRIPT_BL,                 0x00),
+    "hvpbu":     (SCRIPT_BL_UPDATER,         0x00),
+    "hvpbl":     (SCRIPT_BL,                 0x00),
+    "vcfrontbu": (SCRIPT_BL_UPDATER_VCFRONT, 0x00),
+    "vcfrontbl": (SCRIPT_BL,                 0x00),
 }
 
 

@@ -44,9 +44,18 @@ Payload offset in file:
 script contains one or more 48-byte program slots at `+0x00`, `+0x30`, `+0x60`, etc.
 The orchestration layer selects which slot to run based on context.
 
-The `module` byte in the ECU node table (`+0x20`) is loaded into `context+0x29`
-before the VM runs. `moduleToProgram` reads and consumes it, sending `2E 01 02 <module>`
-to select the target CPU/region in the bootloader. For single-CPU ECUs this is `0x00`.
+The `module` byte in the ECU node table (`+0x20`, 1 byte) is loaded into
+`context+0x29` before the VM runs. `moduleToProgram` reads and consumes it,
+sending `2E 01 02 <module>` to select the target CPU/region in the
+bootloader. For single-CPU ECUs this is `0x00`. **Almost every ECU has
+`0x00` here**; the only non-zero values in the binary are for PCS-family
+CPU2 nodes (`pcscpu2`, `di`, `dis`) which carry `0x0C`.
+
+> **Don't confuse `+0x20` with `+0x1C`.** The byte at `+0x1C` (u16) is the
+> ECU's `node_id`, used as the operand to the `udsContextSwitch` opcode and
+> printed as `node=%d` by the binary's flash logger (`FUN_0040fb0a`).
+> Many ECUs have small non-zero values there (cp=5, hvbms=2, vcsec=27,
+> vcfront=13, vcright=25) — those are NOT module bytes.
 
 > **Implementation note — every script flow below shows `reset(soft)` as a single
 > step, but the VM emits two opcodes: `reset` followed by `enterBootloader(0)`.**
@@ -542,13 +551,9 @@ After this script's trailing reset, the ECU comes back up running the bu agent
 in place of the original application. The CAN endpoint is unchanged — same
 `UDS_<parent>Request` / `<PARENT>_udsResponse` IDs as the parent ECU.
 
-Module bytes (from the binary's node table at +0x20):
-
-| ECU type | Parent | Module byte |
-| --- | --- | --- |
-| `parkbu`  | `park`  | `0x12` |
-| `hvbmsbu` | `hvbms` | `0x02` |
-| `hvpbu`   | `hvp`   | `0x0E` |
+Module byte at `+0x20` is `0x00` for all `*bu` nodes; the wire frame is
+`2E 01 02 00`. (The non-zero values at `+0x1C` — `0x12` for parkbu,
+`0x02` for hvbmsbu, `0x0E` for hvpbu — are `node_id`s, not module bytes.)
 
 `vcfrontbu` uses a different script (`0x00651320`) — see below.
 
@@ -609,7 +614,8 @@ A flash tool implementing this needs:
 instead of `(1)` — the "release" counterpart to sub4's "engage". Used in some other
 VCFRONT/VCRIGHT scripts but **not** in `0x00651320`.
 
-Module byte for `vcfrontbu` (from the binary's node table): `0x0D`.
+Module byte at `+0x20` for `vcfrontbu` is `0x00` (wire frame `2E 01 02 00`);
+the `0x0D` at `+0x1C` is the VCFRONT `node_id`, not the module byte.
 
 ---
 
@@ -634,7 +640,8 @@ The bu agent recognizes `fw_type=2` as a bootloader file and erases/rewrites
 the bootloader sector instead of the app slot. After the trailing reset the
 ECU boots into the new bootloader.
 
-Module bytes are the same as the corresponding bu (per parent ECU).
+Module byte at `+0x20` is `0x00` for all `*bl` nodes (same as the
+corresponding `*bu`).
 
 #### Complete bootloader-update sequence
 
@@ -680,14 +687,18 @@ ship only `cp.bhx`; the PLC modem firmware was added at variant 14.
 
 | ecu_type    | Script | Module byte | File format | Target              |
 | ----------- | ------ | ----------- | ----------- | ------------------- |
-| `cp`        | `0x00650fb0` (Standard) | `0x05` | BHX | CP MCU app slot |
-| `cpPlcFw`   | `0x00650fb0` (Standard) | `0x05` | Intel HEX | PLC modem firmware |
-| `cpPlcPib`  | `0x00650fb0` (Standard) | `0x05` | Intel HEX | PLC modem PIB (config) |
+| `cp`        | `0x00650fb0` (Standard) | `0x00` | BHX | CP MCU app slot |
+| `cpPlcFw`   | `0x00650fb0` (Standard) | `0x00` | Intel HEX | PLC modem firmware |
+| `cpPlcPib`  | `0x00650fb0` (Standard) | `0x00` | Intel HEX | PLC modem PIB (config) |
 
-All three use the **same script**, **same module byte**, and the **same UDS
-CAN IDs** (`UDS_cpRequest` / `CP_udsResponse`). The CP MCU bootloader
-distinguishes them by the address ranges in the transferred records — the
-HEX files target memory regions on the PLC modem die, not the CP MCU's flash.
+All three use the **same script**, the same wire frame for `moduleToProgram`
+(`2E 01 02 00`), and the **same UDS CAN IDs** (`UDS_cpRequest` /
+`CP_udsResponse`). The CP MCU bootloader distinguishes them by the address
+ranges in the transferred records — the HEX files target memory regions on
+the PLC modem die, not the CP MCU's flash.
+
+(All three node entries have `0x05` at `+0x1C`, which is the CP `node_id`
+used by `udsContextSwitch`, not the module byte.)
 
 `fw_type` returned by DID `0x0101` during `varifyCompAndFirmwareType` is `1`
 in all three cases — the bootloader doesn't differentiate the file's eventual
