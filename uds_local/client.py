@@ -354,27 +354,53 @@ class UdsSession:
 
     def wait_for_bootloader(
         self,
-        timeout_s: float = 3.5,
+        timeout_s: float = 10.0,
         interval_s: float = 0.04,
     ) -> None:
         """Poll TesterPresent until the bootloader replies, after a reset.
 
         Replicates the practical effect of `enterBootloader(0)` (VM opcode 0,
         variant `FUN_00402120` → `FUN_00401f8c`): send `3E 01` at ~40 ms
-        intervals for up to 3.5 s. Returns on the first `7E 01` positive
-        response. The VM also waits for the boot-broadcast CAN ID to change,
-        but the TP poll alone is enough to gate downstream traffic — once the
-        bootloader answers, it's the one taking calls.
+        intervals up to `timeout_s` seconds. Returns on the first `7E 01`
+        positive response. The VM also watches for the boot-broadcast CAN ID
+        to change, but the TP poll alone is enough to gate downstream traffic
+        — once the bootloader answers, it's the one taking calls.
+
+        Default 10 s budget covers slower bootloaders (e.g. PCS C28x DSP can
+        take 4–6 s). Most ECUs respond well under 1 s, so the high cap costs
+        nothing when handover is fast.
         """
         deadline = time.monotonic() + timeout_s
         interval_ms = max(int(interval_s * 1000), 20)
+        attempts = 0
+        nrc_count = 0
+        first_nrc: int | None = None
         while time.monotonic() < deadline:
+            attempts += 1
             resp = self._send_raw([_SID_TP, 0x01], timeout_ms=interval_ms)
             if resp and resp[0] == 0x7E:
+                elapsed = time.monotonic() - (deadline - timeout_s)
+                print(
+                    f"    Bootloader replied to 3E 01 after"
+                    f" {attempts} attempts ({elapsed:.2f} s)"
+                )
                 return
+            if resp and resp[0] == 0x7F:
+                nrc_count += 1
+                if first_nrc is None and len(resp) >= 3:
+                    first_nrc = resp[2]
             time.sleep(interval_s)
+        diag = (
+            f"sent {attempts} TesterPresent probes,"
+            f" no positive response received"
+        )
+        if nrc_count:
+            diag += (
+                f"; {nrc_count} negative responses"
+                + (f" (first NRC 0x{first_nrc:02X})" if first_nrc is not None else "")
+            )
         raise TimeoutError(
-            f"Bootloader handover did not complete in {timeout_s}s"
+            f"Bootloader handover did not complete in {timeout_s}s — {diag}"
         )
 
     def sleep(self, seconds: float) -> None:
