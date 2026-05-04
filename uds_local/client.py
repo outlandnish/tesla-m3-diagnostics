@@ -352,52 +352,95 @@ class UdsSession:
         )
         self._transport.send_message(msg)
 
+    def _send_tp_no_wait(self) -> None:
+        """Fire-and-forget TesterPresent (`3E 80`) — keep-alive, no response expected.
+
+        Matches `FUN_00430bb0(handle, '\\0')` used by the VM's
+        `enterBootloader(0)` keep-alive loop.
+        """
+        msg = UdsMessage(
+            payload=bytearray([_SID_TP, 0x80]),
+            addressing_type=AddressingType.PHYSICAL,
+        )
+        self._transport.send_message(msg)
+
     def wait_for_bootloader(
         self,
         timeout_s: float = 10.0,
-        interval_s: float = 0.04,
+        keepalive_phase_s: float = 1.5,
+        keepalive_interval_s: float = 0.04,
+        confirm_interval_s: float = 0.1,
     ) -> None:
-        """Poll TesterPresent until the bootloader replies, after a reset.
+        """Two-phase bootloader handover wait, mimicking VM `enterBootloader(0)`.
 
-        Replicates the practical effect of `enterBootloader(0)` (VM opcode 0,
-        variant `FUN_00402120` → `FUN_00401f8c`): send `3E 01` at ~40 ms
-        intervals up to `timeout_s` seconds. Returns on the first `7E 01`
-        positive response. The VM also watches for the boot-broadcast CAN ID
-        to change, but the TP poll alone is enough to gate downstream traffic
-        — once the bootloader answers, it's the one taking calls.
+        **Phase 1 — keep-alive** (`keepalive_phase_s` seconds): send `3E 80`
+        (TesterPresent fire-and-forget, no response expected) at
+        `keepalive_interval_s` cadence. Matches the VM's
+        `FUN_00402120` loop, which spams TP-no-wait while watching for the
+        boot-broadcast ID to change. We don't have boot-broadcast decoding
+        yet, so we just spend a fixed budget here. ECUs that take their
+        time coming up (PCS C28x DSP ~4–6 s) get the headroom they need.
 
-        Default 10 s budget covers slower bootloaders (e.g. PCS C28x DSP can
-        take 4–6 s). Most ECUs respond well under 1 s, so the high cap costs
-        nothing when handover is fast.
+        **Phase 2 — TP-with-response confirmation**: send `3E 00` (ISO
+        14229's only valid TP sub-function) at `confirm_interval_s` cadence,
+        retry on no-response/NRC, succeed on the first `7E 00`. Matches
+        `FUN_00401f8c`. NRC 0x12 (subFunctionNotSupported) means the
+        bootloader is up but rejecting our frame — which is the bug that
+        landed us here in the first place when we had `3E 01`.
+
+        Total budget = `timeout_s` (default 10 s); phase 1 takes
+        `keepalive_phase_s` of that, phase 2 gets the rest.
         """
-        deadline = time.monotonic() + timeout_s
-        interval_ms = max(int(interval_s * 1000), 20)
+        if keepalive_phase_s >= timeout_s:
+            raise ValueError("keepalive_phase_s must be < timeout_s")
+
+        # Phase 1: fire-and-forget keep-alive
+        end_phase1 = time.monotonic() + keepalive_phase_s
+        keepalive_count = 0
+        while time.monotonic() < end_phase1:
+            try:
+                self._send_tp_no_wait()
+                keepalive_count += 1
+            except Exception:
+                # Bus may be transiently down right after reset; keep trying.
+                pass
+            time.sleep(keepalive_interval_s)
+        print(
+            f"    Phase 1: {keepalive_count} keep-alive 3E 80 frames sent"
+            f" over {keepalive_phase_s:.1f}s"
+        )
+
+        # Phase 2: TP-with-response confirmation
+        deadline = time.monotonic() + (timeout_s - keepalive_phase_s)
         attempts = 0
         nrc_count = 0
         first_nrc: int | None = None
+        confirm_start = time.monotonic()
+        confirm_timeout_ms = max(int(confirm_interval_s * 1000), 50)
         while time.monotonic() < deadline:
             attempts += 1
-            resp = self._send_raw([_SID_TP, 0x01], timeout_ms=interval_ms)
+            resp = self._send_raw([_SID_TP, 0x00], timeout_ms=confirm_timeout_ms)
             if resp and resp[0] == 0x7E:
-                elapsed = time.monotonic() - (deadline - timeout_s)
+                elapsed = time.monotonic() - confirm_start
                 print(
-                    f"    Bootloader replied to 3E 01 after"
-                    f" {attempts} attempts ({elapsed:.2f} s)"
+                    f"    Phase 2: bootloader replied to 3E 00 after"
+                    f" {attempts} attempt(s) ({elapsed:.2f}s)"
                 )
                 return
             if resp and resp[0] == 0x7F:
                 nrc_count += 1
                 if first_nrc is None and len(resp) >= 3:
                     first_nrc = resp[2]
-            time.sleep(interval_s)
+            time.sleep(confirm_interval_s)
         diag = (
-            f"sent {attempts} TesterPresent probes,"
-            f" no positive response received"
+            f"phase 1 sent {keepalive_count} keep-alive frames; phase 2 sent"
+            f" {attempts} TesterPresent probes, no positive response"
         )
         if nrc_count:
             diag += (
-                f"; {nrc_count} negative responses"
-                + (f" (first NRC 0x{first_nrc:02X})" if first_nrc is not None else "")
+                f" ({nrc_count} negative responses"
+                + (f", first NRC 0x{first_nrc:02X}" if first_nrc is not None else "")
+                + ")"
             )
         raise TimeoutError(
             f"Bootloader handover did not complete in {timeout_s}s — {diag}"

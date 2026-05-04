@@ -26,8 +26,17 @@ if TYPE_CHECKING:
 _PCS_PRIMARY_TYPES   = frozenset({"pcs", "pm", "pms"})
 _PCS_SECONDARY_TYPES = frozenset({"pcscpu2", "di", "dis"})
 
-# Bootloader-internal module bytes used by prog 1 (NOT the prog-0 node bytes)
-_PROG1_MODULE_SECONDARY = 0x04
+# Module bytes for prog 1's two moduleToProgram calls.
+#
+# The VM's bytecode operands (0x04, 0x00) get overridden on the first call by
+# context+0x29 (loaded from the node table entry's +0x20). When the VM runs
+# prog 1 from the pcscpu2 entry (whose +0x20 is 0x0C), the actual frames are
+# 0x0C then 0x00 — matching the prog-0 node-table values.
+#
+# We previously sent 0x04 / 0x00 thinking those were the wire bytes; observed
+# NRC 0x31 (requestOutOfRange) on the real PCS bootloader for 0x04 confirms
+# that's the inactive operand path. Use the node-table values instead.
+_PROG1_MODULE_SECONDARY = 0x0C
 _PROG1_MODULE_PRIMARY   = 0x00
 
 
@@ -96,18 +105,30 @@ def run_pcs_dual_cpu(
 
     print("  Step: ReadDataByIdentifier COMP_AND_FW_TYPE (0x0101)")
     comp_fw = sess.read_did(0x0101)
+    print(
+        f"    raw response: {len(comp_fw)} bytes —"
+        f" {' '.join(f'{b:02X}' for b in comp_fw)}"
+    )
     if len(comp_fw) < 3:
         from uds_local.client import UdsError
         raise UdsError(0x22, 0x00)
+    # ODJ-documented layout (application response):
+    #   byte[0] = COMPONENT_KEY, byte[1] = FIRMWARE_TYPE, byte[2] = PROTOCOL_VER
+    # PCS bootloader observed 1B 00 05 — looks like COMPONENT_ID=0x001B (LE)
+    # + PROTOCOL_VER=5 with no FIRMWARE_TYPE field at all. Don't abort on a
+    # non-0x01 fw_type byte yet — print it and let the rest of the flow run
+    # so we learn whether subsequent steps care about this value.
     component_key, fw_type, protocol_ver = comp_fw[0], comp_fw[1], comp_fw[2]
     print(
-        f"    component_key=0x{component_key:02X}"
+        f"    parsed (per app ODJ): component_key=0x{component_key:02X}"
         f"  fw_type=0x{fw_type:02X}"
         f"  protocol_ver=0x{protocol_ver:02X}"
     )
     if fw_type != 0x01:
-        raise ValueError(
-            f"Unexpected FIRMWARE_TYPE 0x{fw_type:02X} at DID 0x0101 (expected 0x01)"
+        print(
+            f"    Warning: FIRMWARE_TYPE byte != 0x01"
+            " (PCS bootloader is known to return 0x00; bootloader DID layout"
+            " may differ from application). Proceeding."
         )
 
     seed_level = 0x01 if protocol_ver < 3 else 0x05

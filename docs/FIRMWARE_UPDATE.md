@@ -216,7 +216,7 @@ transferData
 netSetTimeout(4)
 checkModuleProgrammed  checkCorrectComponentAndRev
 reset(soft)
-Shoul
+
 [prog 2]  — quick re-flash (5s post-reset sleep, no part read)
 reset(soft)  orFlags/andNotFlags
 diagnosticSession(2)  netSetTimeout(1)
@@ -758,18 +758,31 @@ additionally retries up to 3 times with 10 s between attempts.
 
 **0b. Bootloader handover wait** (`enterBootloader(0)` — always emitted after `reset`):
 
-1. Read the boot-broadcast ID for this node from its CAN channel.
-2. Poll up to **334 × 10 ms = 3.34 s** waiting for the broadcast ID to **change** —
-   the bootloader broadcasts a different ID once it takes over from the application.
-3. Reduce P2 to 40 ms and ping `3E 01` (TesterPresent, response wait) up to 14 times
-   until one succeeds. Restore the prior P2 afterward.
+The VM's two-phase implementation (`FUN_00402120` + `FUN_00401f8c`):
 
-Implementations without DBC-level decoding can substitute steps 1–2 with the
-TesterPresent polling loop alone — retry `3E 01` at ~40 ms intervals for ~3.5 s
-until the bootloader replies `7E 01`. Skip this if the script's first opcode is
-`reset(1)` or `reset(2)`, which already wait for the application's `51 01` ack;
-the `enterBootloader` step that follows is still required to confirm bootloader
-mode before sending DSC.
+1. **Phase 1 — keep-alive while watching for boot-ID change** (up to 3.34 s):
+   sleep 10 ms, send `3E 80` (TesterPresent fire-and-forget, no response
+   expected), check the boot-broadcast CAN ID for this node — break when its
+   value changes (bootloader is announcing itself on a different ID/payload).
+2. **Phase 2 — TP-with-response confirmation** (up to 14 retries × 40 ms):
+   reduce P2 to 40 ms, send `3E 00` (TesterPresent zeroSubFunction, response
+   required) and break on the first `7E 00` reply. Restore prior P2.
+
+Note the two distinct TesterPresent variants:
+- **`3E 80`** — sub-function `0x00` with `suppressPositiveResponse` bit set; no
+  reply expected. Used in phase 1 (bus keep-alive).
+- **`3E 00`** — sub-function `0x00`, response required; replies `7E 00`. Used
+  in phase 2 (positive confirmation).
+
+`3E 01` is **not** valid TesterPresent — only `0x00` is defined as a sub-function.
+Strict bootloaders return NRC `0x12 subFunctionNotSupported` for `3E 01`.
+
+Implementations without DBC-level boot-ID decoding can substitute phase 1
+with a fixed-time keep-alive loop (e.g. spam `3E 80` for ~1.5 s while the
+bootloader boots), then run phase 2 normally. Skip the entire handover wait
+if the script's first opcode is `reset(1)` or `reset(2)`, which already wait
+for the application's `51 01` ack — though `enterBootloader` is still
+required to confirm bootloader mode before sending DSC.
 
 ---
 
@@ -845,6 +858,15 @@ Three data bytes after the DID echo, in this order:
   (always `1` for prog-0 flash flows). Mismatch → abort with error `0x10000 | fw_type`.
 - byte[2] = `protocol_ver` — stored at `context+0x02` and consumed by the next
   `securityAccess` step to choose the seed level (see section 5).
+
+> **Bootloader-mode caveat (observed on PCS, protocol_ver=5):** the bootloader's
+> response to DID `0x0101` does not match the application ODJ layout. Observed
+> bytes `1B 00 05` correspond to `[COMPONENT_ID_LO, COMPONENT_ID_HI, PROTOCOL_VER]`
+> (`COMPONENT_ID = 0x001B = PCS CPU1`, no `fw_type` field at all). The VM's
+> strict `byte[1] == operand` check would also fail here (it'd see `0x00 != 0x01`),
+> so a real flash tool likely either skips the check, branches on `protocol_ver`,
+> or tolerates the mismatch on the bootloader path. tm3diag downgrades the
+> `fw_type` mismatch to a warning rather than aborting.
 
 ---
 

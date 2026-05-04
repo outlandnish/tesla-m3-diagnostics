@@ -69,6 +69,7 @@ from ._steps import (
     step_hard_reset,
     step_hard_reset_with_retries,
     step_module_to_program,
+    step_probe_bootloader_state,
     step_programming_session,
     step_security_access,
     step_sleep_100ms,
